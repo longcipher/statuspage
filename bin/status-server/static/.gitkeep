@@ -1,0 +1,2 @@
+# Placeholder for rust-embed static asset directory.
+# Frontend build output (wasm + js + css) should be placed here.

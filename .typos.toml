@@ -1,0 +1,29 @@
+[files]
+# - `specs/**`                  — generated spec fixtures, not hand-edited.
+# - `**/assets/plotly.min.js`   — vendored minified third-party bundle; typos
+#   false-positives on minified identifiers (e.g. `ot` flagged as `to`/`of`)
+#   would block `just lint` without any real signal.
+# - `bin/status-frontend/dist/**` — cargo-leptos / trunk build output; the
+#   wasm-bindgen JS glue contains hashed identifiers (e.g. `...ba8612a60`)
+#   that typos flags as English words.
+extend-exclude = [
+    "specs/**",
+    "**/assets/plotly.min.js",
+    "bin/status-frontend/dist/**",
+]
+
+# Legitimate technical terms / domain jargon that typos flags as English
+# misspellings. Each entry maps the term to itself (no correction).
+[default.extend-words]
+# SQL keyword derivations used in prose: "INSERTed", "INSERTs".
+INSER = "INSER"
+# Both spellings are valid; `clonable` is the Rust-ecosystem convention
+# (e.g. `Arc`, `Client` docs use "cheaply clonable").
+clonable = "clonable"
+# Fly.io term: "6PN" is their private IPv6 network product name.
+PN = "PN"
+# `optin` is a valid word ("opt-in") and part of test fn names.
+optin = "optin"
+# Test-only: substring of `longstatevalue` after truncation
+# (`state=longst…`). Not a real word, but the assertion is intentional.
+longst = "longst"

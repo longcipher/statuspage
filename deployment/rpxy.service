@@ -1,0 +1,39 @@
+[Unit]
+Description=rpxy — reverse proxy for StatusPage
+Documentation=https://github.com/junkurihara/rust-rpxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rpxy
+Group=rpxy
+
+ExecStart=/usr/local/bin/rpxy --config /opt/statuspage/config.toml
+
+WorkingDirectory=/opt/statuspage
+
+EnvironmentFile=-/etc/rpxy/env
+
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/statuspage /var/log/rpxy
+
+LimitNOFILE=65536
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rpxy
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,48 @@
+[Unit]
+Description=StatusPage — uptime monitor and status page server
+Documentation=https://github.com/longcipher/statuspage
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=statuspage
+Group=statuspage
+
+# Binary location (adjust if installed elsewhere).
+ExecStart=/usr/local/bin/status-server
+
+# Working directory — config/default.toml is resolved relative to this.
+WorkingDirectory=/opt/statuspage
+
+# Environment — override via /etc/statuspage/env or a drop-in.
+EnvironmentFile=-/etc/statuspage/env
+
+# Graceful shutdown: SIGTERM triggers axum's shutdown signal; the process
+# drains in-flight requests then exits. systemd sends SIGKILL after TimeoutStopSec.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Restart policy — a crashed monitor process should come back immediately.
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/statuspage
+
+# Resource limits — raise for larger deployments.
+LimitNOFILE=65536
+
+# Journald integration — structured JSON logs when log_format = "json".
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=statuspage
+
+[Install]
+WantedBy=multi-user.target

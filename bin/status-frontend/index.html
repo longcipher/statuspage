@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StatusPage</title>
+    <link rel="stylesheet" href="/style/main.css">
+    <!-- Early theme script: applies the saved/OS theme BEFORE the stylesheet
+         finishes loading, so there's no flash of the wrong-theme background.
+         Reads localStorage.theme (set by the ThemeToggle component) and falls
+         back to prefers-color-scheme. Adds `.dark` to <html> when dark mode. -->
+    <script>
+        (function () {
+            try {
+                var t = localStorage.getItem('theme');
+                var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                if (t === 'dark' || (t === null && prefersDark)) {
+                    document.documentElement.classList.add('dark');
+                }
+            } catch (e) { /* localStorage may be blocked; fall through to light */ }
+        })();
+    </script>
+    <!-- Plotly.js runtime: required by the `plotly` crate's `to_inline_html`
+         output, which calls the global `Plotly.newPlot(...)`. Served from the
+         local `assets/` dir; copied to `/pkg/plotly.min.js` alongside the WASM
+         bundle so no CDN dependency is needed. -->
+    <script src="/pkg/plotly.min.js" charset="utf-8"></script>
+</head>
+<body>
+    <script type="module">
+        // `init` is the default export of the wasm-bindgen glue. It loads the
+        // .wasm, instantiates it, and calls `__wbindgen_start()` which in turn
+        // invokes the `#[wasm_bindgen(start)] fn main()` in lib.rs — so we do
+        // NOT call main() explicitly here (double-mount breaks Leptos).
+        //
+        // Pass the options-object form (wasm-bindgen 0.2.100+ deprecates the
+        // bare-string form). The explicit module_or_path keeps the bundle
+        // discoverable regardless of the page's base URL.
+        import init from '/pkg/status_frontend.js';
+        async function run() {
+            await init({ module_or_path: '/pkg/status_frontend_bg.wasm' });
+        }
+        run();
+    </script>
+</body>
+</html>

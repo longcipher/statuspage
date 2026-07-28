@@ -1,0 +1,352 @@
+[server]
+# Default to loopback. Operators must explicitly opt-in to non-loopback binds.
+api_bind = "127.0.0.1:8081"
+
+[runtime]
+worker_threads = 0              # 0 = auto (num_cpus)
+max_blocking_threads = 16
+
+[checker]
+# In-flight probe cap; each permit is a socket + TLS buffers, so it bounds
+# probe memory. Raise per deployment on bigger hosts; overflow fails fast.
+max_concurrent_checks = 1024
+default_timeout_ms = 10000
+connect_timeout_ms = 5000
+default_check_interval_secs = 120
+# Per-(org, host, port) in-flight cap. Tenant-scoped, fail-fast bulkhead.
+per_host_max_inflight = 2
+# Process-wide RDAP cap, per-TLD.
+rdap_max_inflight = 1
+
+[http_client]
+tcp_keepalive_secs = 60
+# user_agent defaults to the crate version; set it only to override.
+
+[dns]
+cache_size = 50000
+positive_ttl_secs = 300
+negative_ttl_secs = 60
+servers = ["1.1.1.1:53", "8.8.8.8:53"]
+
+[security]
+# SSRF guard — see docs/configuration.md.
+allow_private_targets = false
+# 32-byte KEK base64 (`openssl rand -base64 32`). When empty, basic_auth and
+# bearer_token are stored plaintext in check_spec — dev-only.
+credentials_kek_base64 = ""
+# CIDR ranges whose `X-Forwarded-For` is honoured for client-IP extraction.
+# Empty means "no reverse proxy — trust the TCP peer". Behind Caddy / nginx
+# / a CDN, set this to the proxy's address ranges (127.0.0.1 for a local
+# Caddy, the CDN's documented IP set for a CDN). Forgetting
+# it collapses every `ip_hash` in the DB to the proxy's address — abuse
+# indexes useless, magic-link ip_hint shows the proxy.
+trusted_proxies = []
+
+[circuit_breaker]
+failure_threshold = 5
+success_threshold = 2
+open_duration_secs = 60
+half_open_max_calls = 3
+
+# DuckDB storage. Use ":memory:" for an in-memory database (tests/dev),
+# or a file path for persistence.
+[storage]
+duckdb_path = "statuspage.db"
+
+[scheduler]
+# Off = no in-process probing (pure dashboard); a separate agent covers this
+# region. On = this process probes its own region.
+enabled = true
+target_refresh_interval_secs = 30
+# This control plane's region id (override per deployment, e.g. "eu-helsinki").
+# A normal region row, not a sentinel — operator renames it to a real location.
+region = "default"
+# Region new targets are assigned to; empty falls back to `region`.
+default_region = ""
+
+[observability]
+# Fallback only — tracing reads RUST_LOG first, and the container
+# always sets it (compose default `debug`). This governs a bare
+# `cargo run` with no RUST_LOG; keep it conservative.
+log_level = "info"
+log_format = "json"
+metrics_enabled = true
+tracing_enabled = false
+gauge_sample_interval_ms = 1000
+# OTLP/HTTP endpoint for metrics push. When empty, falls back to
+# openobserve.otlp_endpoint. Example: http://localhost:4318/v1/metrics
+metrics_otlp_endpoint = ""
+metrics_push_interval_secs = 60
+
+# OTLP trace export to OpenObserve (or any OTLP/HTTP collector).
+# Active only when observability.tracing_enabled AND openobserve.enabled are
+# both true. api_key is NEVER set here — supply it via the env var
+# STATUSPAGE_OBSERVABILITY__OPENOBSERVE__API_KEY.
+[observability.openobserve]
+enabled = false
+otlp_endpoint = ""           # base, no /v1/traces suffix; e.g.
+                             # http://localhost:5080/api/default
+instance_id = ""             # OpenObserve org name (basic-auth username prefix)
+trace_sample_ratio = 1.0     # parent-based head sampling; 1.0 = keep all
+                             # (low volume — lower when traffic grows)
+
+# External dead-man's-switch. While every critical dependency is reachable the
+# app pings `url` every `interval_seconds`; an independent watcher alerts when
+# the pings stop. url carries a token — set it via the env var
+# STATUSPAGE_OBSERVABILITY__HEARTBEAT__URL, never here. interval_seconds must be
+# shorter than the watcher's grace period.
+[observability.heartbeat]
+enabled = false
+url = ""
+interval_seconds = 60
+
+# Per-IP API rate limiting is enforced by Caddy (see deployment/Caddyfile);
+# the in-process limiter is per-org / per-user — see [rate_limits] + plans.
+
+# Outbound notification channels. Per-target opt-in via the target's `alerts`
+# field references the channel by key; entries here only define transport
+# credentials. Channels marked `enabled = false` cause target opt-ins to no-op.
+[notifications.slack]
+enabled = false
+webhook_url = ""
+
+[notifications.webhook]
+enabled = false
+url = ""
+
+[notifications.email]
+enabled = false
+smtp_host = ""
+smtp_port = 587
+smtp_user = ""
+smtp_password = ""
+from = ""
+# When true, opens a plain TCP connection and upgrades to TLS via STARTTLS.
+# When false, opens an implicit-TLS connection on smtp_port (typically 465).
+starttls = true
+
+[api.cors]
+# Browser CORS for /api/v1/*. Disabled by default. When enabled, every entry in
+# `allowed_origins` must be a full origin (scheme://host[:port]); wildcards are
+# only honored when `allow_any_origin = true`.
+enabled = false
+allowed_origins = []
+allowed_methods = ["GET", "POST", "PATCH", "DELETE"]
+allow_any_origin = false
+
+[tenancy]
+# Path-based public surface (`/status/<slug>`, `/api/public/v1/*` on the
+# operator host, org resolved from the slug). Set to false in deployments
+# that route every public surface through the per-org subdomain.
+path_based_public_routes = true
+# Wildcard subdomain public surface (`*.{public_status.base_domain}`).
+# Set true together with a well-formed `public_status.base_domain` to serve
+# per-org status pages on dedicated subdomains.
+subdomain_public_routes = false
+# Free-tier cap on orgs a single user can own.
+free_tier_owner_org_limit = 3
+# Grace period before soft-deleted orgs *and users* are purged. Also the
+# account-recovery window; the Privacy Policy quotes this number.
+deletion_grace_period_days = 30
+
+# Long-horizon data retention for the periodic purge job (runs every 6h).
+# Every key here is bound by the job — no decorative knobs. Windows on a
+# different cadence live with their owner and are deliberately NOT repeated
+# here:
+#   - sessions / magic_link_tokens   : own purge sweeps in this worker
+#   - session idle / absolute timeout : [auth.session]
+#   - server / app log retention       : journald (or your log collector)
+[retention]
+check_results_days = 30
+api_tokens_post_expiry_days = 30
+
+# `base_domain` is required when tenancy.subdomain_public_routes = true; the
+# startup assertion refuses to boot without it (would let the slug extractor
+# match arbitrary Host headers).
+[public_status]
+base_domain = ""
+cache_max_orgs = 1000
+cache_ttl_secs = 10
+last_good_ttl_secs = 3600
+# 1 MiB. Real logos (PNG/JPEG/WebP) routinely exceed 200 KB; the prior
+# 204800 cap rejected ordinary uploads. Decode is still bounded by a
+# dimension + allocation guard (see status_page::process_logo) so a large
+# byte budget is not a decompression-bomb vector.
+max_logo_size_bytes = 1048576
+allowed_logo_mime_types = ["image/png", "image/jpeg", "image/webp"]
+max_logo_dimension_px = 1200
+default_brand_color = "#3b82f6"
+default_show_powered_by = true
+# Second line of defence behind the Caddy-side limit.
+public_per_ip_rate_limit_per_min = 60
+
+# Transactional product email (org invitations, magic-link sign-in). Distinct
+# from [notifications.email], which is the outage-alert SMTP channel.
+[email]
+# "resend" | "log" | "memory". Dev default is "log" so `cargo run` works with
+# no external accounts — action URLs are printed to tracing.
+provider = "log"
+from_name = "Statuspage"
+from_address = "no-reply@example.invalid"
+
+[email.resend]
+# From https://resend.com/api-keys. Required when provider = "resend".
+api_key = ""
+
+[auth]
+# Policy switch per sign-in method. OAuth providers additionally need their
+# client credentials + redirect_url set below (list = policy, creds =
+# capability); magic_link gates its request/verify routes + purge ticker.
+enabled_methods = ["github_oauth", "google_oauth", "magic_link"]
+# Salt for hashing IPs / user-agents in login_attempts + sessions.
+# GENERATE WITH: openssl rand -base64 32
+# LOAD-BEARING: rotating this re-fragments anomaly-detection windows. The
+# startup guard refuses to boot on a mismatch unless
+# STATUSPAGE_AUTH_ACCEPT_SALT_ROTATION=1 is set.
+fingerprint_salt = ""
+
+[auth.session]
+idle_timeout_days = 30
+absolute_timeout_days = 90
+cookie_name = "_sm_session"
+cookie_secure = true
+cookie_domain = ""
+renew_on_use = true
+
+[auth.github]
+client_id = ""
+client_secret = ""
+redirect_url = ""
+scopes = ["user:email", "read:user"]
+
+[auth.google]
+client_id = ""
+client_secret = ""
+redirect_url = ""
+scopes = ["openid", "email", "profile"]
+
+[auth.invitations]
+expiry_hours = 168
+# Pending-invitation cap now lives in plans.max_pending_invitations.
+
+[auth.api_tokens]
+# Per-user token cap now lives in plans.max_api_tokens_per_user.
+# Floor of 16 chars = 48 bits of entropy in the visible prefix (collision-safe
+# to ~16M tokens). Startup assertion refuses to boot below that.
+prefix_visible_chars = 16
+
+[auth.magic_link]
+expiry_minutes = 15
+rate_limit_seconds = 60
+
+[quotas]
+# Cache TTLs for plan / usage lookups.
+plan_cache_ttl_secs = 300
+usage_cache_ttl_secs = 10
+
+[rate_limits]
+# Per-org / per-user limits come from the plans table. These mirror the
+# per-IP numbers Caddy enforces (here for ops parity) and the in-process
+# limiter-map janitor cadence.
+[rate_limits.per_ip]
+public_pages_per_min = 60
+auth_endpoints_per_min = 10
+org_creations_per_day = 3
+# Per-IP cap on POST /api/v1/heartbeat/{target_id}. Heartbeat pings are
+# unauthenticated (the target_id UUID is the shared secret); without a
+# per-IP cap an attacker could exhaust the DuckDB mutex throughput and
+# starve legitimate API traffic. 0 = disabled (rely on the reverse proxy).
+# Default 30/min allows one ping every 2s — plenty for any heartbeat
+# schedule (typical period is 60s–5min).
+heartbeat_per_ip_per_min = 30
+
+[rate_limits.janitor]
+cleanup_interval_hours = 6
+idle_threshold_hours = 24
+
+[marketing]
+# When true, mounts the apex/`www` marketing site + blog. The dispatch
+# seam (web/host.rs + marketing/dispatch.rs) routes those hosts to the
+# marketing router; every other host stays on the app router. Leave
+# false for self-host: the apex is rarely served on a single-box deploy
+# and the boot-time invariants will refuse a half-set config.
+enabled = false
+
+# CTA + login link target on every marketing page. The marketing module
+# never imports app code — this is the only handle it has on the app
+# surface, so the extracted service points anywhere with one config
+# change. Must be a fully-qualified https URL with no trailing slash.
+app_url = ""
+
+# Fully-qualified canonical origin (scheme + host, no trailing slash)
+# used for <link rel="canonical">, OG/JSON-LD absolute URLs, and the
+# generated sitemap.
+canonical_origin = ""
+
+# Subdomain labels that must never alias a tenant slug. Asserted at boot
+# to be a subset of `domain::reserved_slugs::RESERVED_SLUGS`. The
+# dispatcher already routes apex/`www`/`app` explicitly; this list is a
+# belt-and-braces drift guard.
+reserved_subdomains = ["www", "app"]
+
+# Mount the /blog routes. The post sources live in
+# `src/marketing/content/blog/` and are compiled into the binary.
+blog_enabled = true
+
+[mcp]
+# Read-only Model Context Protocol server at /mcp (JSON-RPC 2.0 over HTTP).
+# Off by default; flip to true to expose MCP tools to LLM clients (Claude
+# Desktop, MCP Inspector, etc.). Auth reuses the app's session cookie or
+# Bearer API token — single-tenant, no OAuth.
+enabled = false
+
+# Allowed browser origins for the transport's RFC 6454 Origin check
+# (DNS-rebinding defense). Empty disables the check; a request with no Origin
+# header always passes (non-browser clients like `mcp-remote` send none). Add
+# the connector's browser origin(s) here, e.g. ["https://claude.ai"].
+allowed_origins = []
+
+[escalation]
+# Escalation policies. The incident notifier always runs — incidents page the
+# monitor's bound channels on open/resolve regardless of this flag. Enabling it
+# adds the policy machinery on top: escalation ladders, on-call schedules, and
+# their settings UI.
+enabled = false
+
+# How often failed pages are re-attempted.
+tick_interval_secs = 15
+
+# Backpressure: max pages re-sent per sweep.
+max_pages_per_tick = 500
+
+# Give up paging a channel after this many failed attempts.
+max_attempts = 5
+
+# Regional probe mode. Off = this process is a normal dashboard. On = it runs
+# as a stateless agent: pulls its region's monitor config from control_plane_url
+# and ships results back, with no local DuckDB/web/alerting. The
+# token carries a capability — set it via STATUSPAGE_AGENT__TOKEN, never here.
+[agent]
+enabled = false
+control_plane_url = ""
+region = ""
+pull_interval_secs = 30
+flush_interval_secs = 5
+buffer_capacity = 10000
+
+# Operator (instance-admin) surface for managing regions and agents across all
+# tenants. Gated by a static bearer secret — set it via STATUSPAGE_OPERATOR__ADMIN_TOKEN,
+# never here. Empty disables the surface (it 404s).
+[operator]
+admin_token = ""
+
+# Operator-owned central Telegram bot: customers link a chat by tapping a deep
+# link instead of running their own bot. A non-empty bot_token turns on the
+# connect button, the /hooks/telegram receiver, and the boot webhook handshake.
+# All three values are capabilities — set them via STATUSPAGE_TELEGRAM__* env,
+# never here. Empty leaves the feature absent; bring-your-own telegram channels
+# are unaffected.
+[telegram]
+bot_token = ""
+bot_username = ""
+webhook_secret = ""

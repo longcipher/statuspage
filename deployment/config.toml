@@ -1,0 +1,78 @@
+# rpxy configuration — Production reverse proxy for StatusPage
+#
+# rpxy terminates TLS and proxies to the `status-server` systemd service
+# on 127.0.0.1:8081. The server embeds DuckDB, so there are no external
+# databases to wire up.
+#
+# What this does:
+#   - Automatic HTTPS via Let's Encrypt (TLS-ALPN-01 ACME)
+#   - HTTP/2 and HTTP/3 (QUIC)
+#   - Reverse proxy to 127.0.0.1:8081
+#   - Path-based routing: /metrics blocked, /static /pkg /style cached
+#   - Active health checks on the upstream
+#   - Access logging with file rotation
+#
+# Required environment variables (set in /etc/rpxy/env or shell):
+#   STATUSPAGE_DOMAIN     — your domain, e.g. status.example.com
+#   STATUSPAGE_ACME_EMAIL — for Let's Encrypt notifications
+#
+# Usage:
+#   sudo rpxy --config /opt/statuspage/config.toml
+#   or run via the rpxy systemd service unit
+
+###################################
+# Global settings                 #
+###################################
+listen_port = 80
+listen_port_tls = 443
+listen_ipv6 = false
+max_clients = 512
+tcp_listen_backlog = 1024
+
+# Trusted proxies (loopback for local upstream)
+trusted_forwarded_proxies = ["127.0.0.1/32", "::1/128"]
+
+###################################
+# Application settings            #
+###################################
+
+[apps.statuspage]
+server_name = "STATUSPAGE_DOMAIN_PLACEHOLDER"
+tls = { https_redirection = true, acme = true }
+
+# Default reverse proxy — catch-all for all paths
+[[apps.statuspage.reverse_proxy]]
+upstream = [{ location = "127.0.0.1:8081" }]
+upstream_options = ["keep_original_host"]
+# Active health check on the upstream
+[apps.statuspage.reverse_proxy.health_check]
+type = "http"
+path = "/healthz"
+expected_status = 200
+interval = 10
+timeout = 5
+unhealthy_threshold = 3
+healthy_threshold = 2
+
+###################################
+# Experimental settings           #
+###################################
+
+[experimental]
+ignore_sni_consistency = false
+connection_handling_timeout = 0
+
+# HTTP/3 (QUIC)
+[experimental.h3]
+alt_svc_max_age = 3600
+max_concurrent_connections = 512
+max_concurrent_bidistream = 100
+max_concurrent_unistream = 100
+max_idle_timeout = 10
+
+# ACME settings — automatic certificate issuance and renewal
+[experimental.acme]
+email = "ACME_EMAIL_PLACEHOLDER"
+# dir_url defaults to Let's Encrypt production; uncomment for staging:
+# dir_url = "https://acme-staging-v02.api.letsencrypt.org/directory"
+registry_path = "/opt/statuspage/acme_registry"

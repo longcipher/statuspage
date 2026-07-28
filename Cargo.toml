@@ -1,0 +1,272 @@
+[workspace]
+members = ["bin/*", "crates/*"]
+exclude = [".github/"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "Apache-2.0"
+repository = "https://github.com/longcipher/statuspage"
+publish = false
+
+# ── Shared dependencies (version pinned here; sub-crates opt in via
+#     `xxx.workspace = true` and add features locally) ──────────────────
+[workspace.dependencies]
+
+# Crypto (auth, signing, encryption)
+aes-gcm = "0.11.0"
+argon2 = "0.5.3"
+
+# Utilities
+async-trait = "0.1.91"
+
+# Web framework (axum + tower stack)
+axum = { version = "0.8.9", features = ["multipart"] }
+
+# HTTP client (custom hyper-util stack)
+base64 = "0.23.0"
+chrono = { version = "0.4.45", features = ["serde"] }
+chrono-tz = { version = "0.10.4", default-features = false }
+config = "0.15.25"
+
+# Leptos CSR (frontend)
+console_error_panic_hook = "0.1.7"
+console_log = "1.1.0"
+dashmap = "6.2.1"
+
+# Storage: DuckDB (embedded analytical database)
+duckdb = { version = "1.10505.0", features = ["bundled"] }
+eyre = "0.6.12"
+fastrand = "2.5.0"
+futures = "0.3.33"
+hex = "0.4.3"
+
+# DNS (custom caching resolver)
+hickory-resolver = { version = "0.26.1", features = ["tls-ring", "tokio"] }
+http-body-util = "0.1.4"
+hyper = { version = "1.11.0", features = ["client", "http1", "http2"] }
+hyper-rustls = { version = "0.27.9", default-features = false, features = ["http1", "http2", "native-tokio", "ring", "rustls-native-certs", "webpki-tokio"] }
+hyper-util = { version = "0.1.20", features = ["full"] }
+ipnet = { version = "2.12.0", features = ["serde"] }
+leptos = "0.8.20"
+leptos_meta = "0.8.6"
+leptos_router = "0.8.14"
+lettre = { version = "0.11.22", default-features = false, features = ["smtp-transport", "builder", "pool", "tokio1-rustls-tls"] }
+log = "0.4.33"
+
+# Observability (tracing + metrics + OTLP export)
+metrics = "0.24.6"
+moka = { version = "0.12.15", features = ["future"] }
+opentelemetry = { version = "0.32.0", features = ["metrics"] }
+opentelemetry-otlp = { version = "0.32.0", features = ["metrics", "http-proto"] }
+opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio"] }
+parking_lot = "0.12.5"
+psl = "2.1.223"
+rand = "0.10.2"
+# Lightweight HTTP client for the in-process scheduler probe (kept off the
+# check-path stack on purpose — that runs through hyper + SsrfGuard).
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "http2"] }
+
+# TLS
+rustls = "0.23.42"
+secrecy = { version = "0.10.3", features = ["serde"] }
+
+# Serialization
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+
+# ICMP echo probes
+surge-ping = "0.9.0"
+thiserror = "2.0.19"
+# Async runtime
+tokio = { version = "1.53.1", features = ["full"] }
+tokio-rustls = "0.26.4"
+tokio-util = "0.7.19"
+tower = "0.5.3"
+tower-http = { version = "0.7.0", features = ["trace", "compression-gzip", "compression-br", "cors", "fs", "set-header", "limit"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+url = { version = "2.5.8", features = ["serde"] }
+utoipa = { version = "5.5.0", features = ["axum_extras", "chrono", "uuid", "url"] }
+uuid = { version = "1.24.0", features = ["v7", "serde"] }
+wasm-bindgen = "0.2.126"
+x509-parser = "0.18.1"
+# Zeroing sensitive buffers (KEK material, decrypted plaintext) on drop.
+zeroize = "1.8.1"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+doc_markdown = "allow"
+similar_names = "allow"
+too_many_lines = "allow"
+module_name_repetitions = "allow"
+struct_excessive_bools = "allow"
+fn_params_excessive_bools = "allow"
+items_after_statements = "allow"
+uninlined_format_args = "allow"
+return_self_not_must_use = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+cast_possible_wrap = "allow"
+cast_lossless = "allow"
+default_trait_access = "allow"
+unused_async = "allow"
+manual_let_else = "allow"
+used_underscore_binding = "allow"
+ref_option_ref = "allow"
+ref_option = "allow"
+format_push_string = "allow"
+case_sensitive_file_extension_comparisons = "allow"
+unnecessary_wraps = "allow"
+needless_pass_by_value = "allow"
+trivially_copy_pass_by_ref = "allow"
+no_effect_underscore_binding = "allow"
+redundant_closure_for_method_calls = "allow"
+# `match_same_arms` is `allow`: the codebase uses `#[non_exhaustive]` enums
+# pervasively, and the wildcard arm frequently duplicates an explicit arm
+# to document which known variant shares the fallback behaviour. The lint
+# fires on every such case (~28 hits) without catching real bugs — the
+# explicit arm is deliberate documentation, not a copy-paste error.
+match_same_arms = "allow"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+allow_attributes = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+borrow_as_ptr = "warn"
+branches_sharing_code = "warn"
+clear_with_drain = "warn"
+cloned_instead_of_copied = "warn"
+collection_is_never_read = "warn"
+derive_partial_eq_without_eq = "warn"
+empty_line_after_doc_comments = "warn"
+empty_line_after_outer_attr = "warn"
+enum_glob_use = "warn"
+equatable_if_let = "warn"
+explicit_into_iter_loop = "warn"
+explicit_iter_loop = "warn"
+flat_map_option = "warn"
+from_iter_instead_of_collect = "warn"
+if_not_else = "warn"
+if_then_some_else_none = "warn"
+implicit_clone = "warn"
+imprecise_flops = "warn"
+iter_on_empty_collections = "warn"
+iter_on_single_items = "warn"
+iter_with_drain = "warn"
+iter_without_into_iter = "warn"
+large_stack_frames = "warn"
+manual_assert = "warn"
+manual_clamp = "warn"
+manual_is_variant_and = "warn"
+manual_string_new = "warn"
+missing_const_for_fn = "warn"
+mutex_integer = "warn"
+naive_bytecount = "warn"
+needless_bitwise_bool = "warn"
+needless_continue = "warn"
+needless_for_each = "warn"
+needless_pass_by_ref_mut = "warn"
+nonstandard_macro_braces = "warn"
+option_as_ref_cloned = "warn"
+or_fun_call = "warn"
+path_buf_push_overwrite = "warn"
+read_zero_byte_vec = "warn"
+redundant_clone = "warn"
+redundant_else = "warn"
+single_char_pattern = "warn"
+string_lit_as_bytes = "warn"
+string_lit_chars_any = "warn"
+suboptimal_flops = "warn"
+suspicious_operation_groupings = "warn"
+trailing_empty_array = "warn"
+trait_duplication_in_bounds = "warn"
+transmute_undefined_repr = "warn"
+trivial_regex = "warn"
+tuple_array_conversions = "warn"
+type_repetition_in_bounds = "warn"
+uninhabited_references = "warn"
+unnecessary_self_imports = "warn"
+unnecessary_struct_initialization = "warn"
+unnested_or_patterns = "warn"
+unused_peekable = "warn"
+unused_rounding = "warn"
+use_self = "warn"
+useless_let_if_seq = "warn"
+while_float = "warn"
+zero_sized_map_values = "warn"
+as_ptr_cast_mut = "allow"
+cognitive_complexity = "warn"
+debug_assert_with_mut_call = "allow"
+fallible_impl_from = "allow"
+future_not_send = "warn"
+needless_collect = "warn"
+non_send_fields_in_send_ty = "allow"
+redundant_pub_crate = "allow"
+significant_drop_in_scrutinee = "warn"
+significant_drop_tightening = "warn"
+too_long_first_doc_paragraph = "allow"
+
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+# `missing_docs` is intentionally `allow`: the workspace has ~1400 public
+# items without doc comments across the domain/config surface. Enforcing
+# docs-per-item here would block `just lint` (which runs `-D warnings`)
+# without improving real API discoverability — the high-level module docs
+# and `#[derive(ToSchema)]` OpenAPI output already serve that role. Revisit
+# once the public API stabilises and a documentation pass is scheduled.
+missing_docs = "allow"
+rust_2018_idioms = { level = "warn", priority = -1 }
+# `unreachable_pub` is `allow`: ~120 hits, a large share of which are serde
+# `serialize_with` / `deserialize_with` helpers that MUST be `pub` for the
+# derive to resolve the path even though they are never called directly
+# (a known false-positive of this lint). The remaining hits are internal
+# consts/helpers that could become `pub(crate)` — worth a focused cleanup
+# pass, but not valuable enough to block `just lint` on.
+unreachable_pub = "allow"
+unused_must_use = "deny"
+
+[workspace.lints.rustdoc]
+all = "warn"
+
+[profile.bench]
+debug = true
+
+[profile.dev]
+codegen-units = 16
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.release-debug]
+inherits = "release"
+debug = true
+strip = false
+
+# Release profile for the CSR WASM bundle (used by `cargo build
+# --target wasm32-unknown-unknown --profile wasm-release`). Smaller binary
+# at the cost of longer link time — the right trade-off for a one-time
+# frontend build shipped to every browser.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1

@@ -1,0 +1,39 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+
+use crate::domain::org::OrgId;
+use crate::domain::user::UserId;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum Role {
+    Owner,
+    Member,
+}
+
+impl Role {
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Owner => "owner",
+            Self::Member => "member",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Option<Self> {
+        match s {
+            "owner" => Some(Self::Owner),
+            "member" => Some(Self::Member),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Membership {
+    pub user_id: UserId,
+    pub org_id: OrgId,
+    pub role: Role,
+    pub created_at: DateTime<Utc>,
+}

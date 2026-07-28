@@ -1,0 +1,47 @@
+[package]
+name = "statuscore"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "statuscore"
+path = "src/lib.rs"
+
+[dependencies]
+
+# OpenAPI schema derives (used by domain model types)
+argon2 = { workspace = true, features = ["std"] }
+base64.workspace = true
+
+# Domain primitives
+chrono = { workspace = true }
+chrono-tz = { workspace = true }
+
+# Configuration loading
+config = { workspace = true }
+
+# Error handling
+eyre = { workspace = true }
+fastrand = { workspace = true }
+hex.workspace = true
+ipnet = { workspace = true }
+psl = { workspace = true }
+rand.workspace = true
+secrecy = { workspace = true }
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2.workspace = true
+thiserror = { workspace = true }
+
+# Observability
+tracing = { workspace = true }
+url = { workspace = true }
+utoipa = { workspace = true }
+uuid = { workspace = true }
+
+[lints]
+workspace = true

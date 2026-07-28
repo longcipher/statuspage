@@ -1,0 +1,96 @@
+[package]
+name = "status-frontend"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# cargo-leptos configuration for pure CSR (client-side rendering).
+# cargo-leptos 0.3.x requires a `[[bin]]` target to exist for package
+# resolution, even with `--frontend-only`. The stub bin at `src/bin/stub.rs`
+# is never compiled into the WASM bundle and is never shipped — it exists
+# solely so cargo-leptos can resolve the package. The real entry point is
+# `lib.rs` (built as a `cdylib` for `wasm32-unknown-unknown` with the `csr`
+# feature), and cargo-leptos handles wasm-bindgen glue generation + asset
+# assembly into `site-root`.
+[package.metadata.leptos]
+output-name = "status_frontend"
+site-root = "target/site"
+site-pkg-dir = "pkg"
+lib-features = ["csr"]
+# Dev server port (used by `cargo leptos watch`).
+port = 3002
+
+# cargo-shear runs on the host target and cannot see `#[cfg(target_arch =
+# "wasm32")]` usage. `getrandom` is pulled in solely to enable the `wasm_js`
+# feature for the wasm32 build (transitive dep of uuid / rand). List it so
+# `cargo shear` stays green.
+[package.metadata.cargo-shear]
+ignored = ["getrandom"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "status_frontend_stub"
+path = "src/bin/stub.rs"
+
+# Crate-level `csr` feature — required by cargo-leptos (`lib-features = ["csr"]`
+# in [package.metadata.leptos]). Forwards to `leptos/csr` which enables the
+# `BrowserUrl` router provider. The plain `cargo build --target wasm32-unknown-
+# unknown` path (used by `just fe-build-wasm` in CI) also gets `leptos/csr`
+# via the hardcoded `features = ["csr"]` on the leptos dependency below.
+[features]
+csr = ["leptos/csr"]
+
+[dependencies]
+# `wasmbind` feature gives chrono access to `js_sys::Date` for `Utc::now()`
+# in the WASM target — without it, `Utc::now()` panics with
+# "time not implemented on this platform" on the status page detail and
+# target detail pages (both call `Utc::now()` for the 90-day day-strip).
+chrono = { workspace = true, features = ["wasmbind"] }
+console_error_panic_hook.workspace = true
+console_log.workspace = true
+futures.workspace = true
+getrandom = { version = "0.4", features = ["wasm_js"] }
+# js-sys needed for Promise-based delay (retry backoff) in the HTTP client.
+# Version aligned with the js-sys pulled transitively by web-sys 0.3.103.
+js-sys = "0.3.77"
+# `csr` feature is REQUIRED for client-side rendering. cargo-leptos enables it
+# automatically via [package.metadata.leptos]; since we build with plain
+# `cargo build --target wasm32-unknown-unknown`, we must enable it here. Without
+# it, the router's `BrowserUrl` provider is absent and `Routes` matches nothing.
+leptos = { workspace = true, features = ["csr"] }
+leptos_meta.workspace = true
+leptos_router.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+statuscore = { path = "../../crates/core" }
+# `js` feature gives uuid a WASM-friendly RNG source (web-sys::crypto) so that
+# `Uuid::now_v7()` / `Uuid::new_v4()` work in the browser. Without it, uuid
+# emits a compile_error on wasm32-unknown-unknown.
+uuid = { workspace = true, features = ["js"] }
+wasm-bindgen.workspace = true
+wasm-bindgen-futures = "0.4.76"
+# web-sys features needed for the Fetch API client. Leptos already pulls
+# web-sys transitively; declaring the features we use here ensures they are
+# enabled even if leptos' internal feature set changes.
+web-sys = { version = "0.3.103", features = [
+    "AbortController",
+    "AbortSignal",
+    "Document",
+    "Element",
+    "Headers",
+    "HtmlElement",
+    "Request",
+    "RequestInit",
+    "RequestMode",
+    "Response",
+    "Storage",
+    "Window",
+] }
+
+[lints]
+workspace = true

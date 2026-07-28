@@ -1,0 +1,242 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use uuid::Uuid;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum OverallState {
+    Operational,
+    Maintenance,
+    MinorDisruption,
+    PartialOutage,
+    MajorOutage,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct OverallStatus {
+    pub state: OverallState,
+    #[schema(example = "All Systems Operational")]
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum PublicComponentStatus {
+    Operational,
+    Degraded,
+    PartialOutage,
+    MajorOutage,
+    Maintenance,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DayState {
+    Operational,
+    Degraded,
+    PartialOutage,
+    MajorOutage,
+    Maintenance,
+    NoData,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PublicComponent {
+    pub id: Uuid,
+    pub name: String,
+    #[schema(nullable = true)]
+    pub description: Option<String>,
+    pub current_status: PublicComponentStatus,
+    /// Daily history, oldest first.
+    pub history: Vec<DayState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PublicComponentGroup {
+    #[schema(nullable = true, example = "API")]
+    pub name: Option<String>,
+    pub components: Vec<PublicComponent>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum IncidentSeverity {
+    Minor,
+    #[default]
+    Major,
+    Critical,
+}
+
+impl IncidentSeverity {
+    /// Every variant in declaration order. Used by the enum-drift integration
+    /// test to compare against the live storage-layer CHECK constraint; keep
+    /// in lockstep with the enum body. (Adding a variant without extending
+    /// `ALL` lets the drift test pass while the migration list silently
+    /// disagrees, so this list is itself a load-bearing invariant.)
+    pub const ALL: &'static [Self] = &[Self::Minor, Self::Major, Self::Critical];
+
+    /// Stable string used in the storage-layer `severity` CHECK constraint
+    /// and the JSON wire form. Unknown DB values fall back to `Major`
+    /// (defensive against migrations / corruption — never panics on parse).
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Minor => "minor",
+            Self::Major => "major",
+            Self::Critical => "critical",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Self {
+        match s {
+            "minor" => Self::Minor,
+            "critical" => Self::Critical,
+            _ => Self::Major,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum IncidentStatusPhase {
+    Investigating,
+    Identified,
+    Monitoring,
+    Resolved,
+    Postmortem,
+}
+
+impl IncidentStatusPhase {
+    /// Every variant in declaration order; see the matching comment on
+    /// `IncidentSeverity::ALL`.
+    pub const ALL: &'static [Self] = &[
+        Self::Investigating,
+        Self::Identified,
+        Self::Monitoring,
+        Self::Resolved,
+        Self::Postmortem,
+    ];
+
+    /// Stable string used in the storage-layer `phase` CHECK constraint and
+    /// the JSON wire form. Unknown DB values fall back to `Investigating` so
+    /// a migration / corruption never panics a read path.
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Investigating => "investigating",
+            Self::Identified => "identified",
+            Self::Monitoring => "monitoring",
+            Self::Resolved => "resolved",
+            Self::Postmortem => "postmortem",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Self {
+        match s {
+            "identified" => Self::Identified,
+            "monitoring" => Self::Monitoring,
+            "resolved" => Self::Resolved,
+            "postmortem" => Self::Postmortem,
+            _ => Self::Investigating,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PublicIncidentUpdate {
+    pub posted_at: DateTime<Utc>,
+    pub phase: IncidentStatusPhase,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PublicIncident {
+    pub id: Uuid,
+    pub component_id: Uuid,
+    pub component_name: String,
+    /// `public_title` if set; otherwise auto-generated like `"API major outage"`.
+    pub title: String,
+    pub started_at: DateTime<Utc>,
+    #[schema(nullable = true)]
+    pub ended_at: Option<DateTime<Utc>>,
+    pub severity: IncidentSeverity,
+    /// Most recent phase from operator updates; `investigating` if none.
+    pub status_phase: IncidentStatusPhase,
+    pub updates: Vec<PublicIncidentUpdate>,
+    /// Present only once an operator publishes a postmortem; never set on list
+    /// views.
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub postmortem: Option<PublicPostmortem>,
+}
+
+/// One published postmortem action item. The internal owner is deliberately
+/// omitted — only the public-safe task text and its done state are exposed.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PublicActionItem {
+    pub text: String,
+    pub done: bool,
+}
+
+/// Customer-facing postmortem. Only surfaces after an operator publishes it.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PublicPostmortem {
+    #[schema(nullable = true)]
+    pub summary: Option<String>,
+    #[schema(nullable = true)]
+    pub root_cause: Option<String>,
+    #[schema(nullable = true)]
+    pub impact: Option<String>,
+    pub action_items: Vec<PublicActionItem>,
+    pub published_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PublicMaintenance {
+    pub id: Uuid,
+    pub title: String,
+    #[schema(nullable = true)]
+    pub description: Option<String>,
+    pub starts_at: DateTime<Utc>,
+    pub ends_at: DateTime<Utc>,
+    pub affected_component_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PublicMaintenanceList {
+    pub active: Vec<PublicMaintenance>,
+    pub upcoming: Vec<PublicMaintenance>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PublicStatusPage {
+    pub overall: OverallStatus,
+    pub generated_at: DateTime<Utc>,
+    pub site_name: String,
+    pub groups: Vec<PublicComponentGroup>,
+    pub active_incidents: Vec<PublicIncident>,
+    pub recent_incidents: Vec<PublicIncident>,
+    /// True when the org has more incidents past `recent_incidents` than
+    /// were rendered into this snapshot. Drives the "older incidents" link
+    /// on the public page → archive view.
+    pub recent_incidents_has_more: bool,
+    pub active_maintenance: Vec<PublicMaintenance>,
+    pub upcoming_maintenance: Vec<PublicMaintenance>,
+    /// sha256 of the page's `logo` asset, or `None` when no logo is set.
+    /// The frontend appends it as a cache-buster query param
+    /// (`?v={logo_hash}`) so a logo swap is reflected immediately without
+    /// a hard refresh. Sourced from `page_assets` on snapshot compute.
+    pub logo_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ComponentHistoryResponse {
+    pub component_id: Uuid,
+    pub component_name: String,
+    pub days: u32,
+    pub history: Vec<DayState>,
+}

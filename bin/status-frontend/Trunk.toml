@@ -1,0 +1,37 @@
+# Trunk dev-server config for the status-frontend CSR app.
+#
+# `just fe-dev` runs `trunk serve` against this file. Production builds do NOT
+# use Trunk — they use `just fe-build` (cargo + wasm-bindgen directly).
+#
+# Trunk serves the WASM app on :3002 and proxies the JSON API + health
+# endpoints to the axum backend on :8081, so the browser's same-origin fetch
+# to `/api/v1/*` works in dev without CORS.
+
+[serve]
+# Bound on all interfaces so a VM / remote dev box can be reached; pair with
+# the backend's loopback bind for local-only dev.
+address = "0.0.0.0"
+port = 3002
+
+# Proxy backend surfaces to the axum server. Each entry maps a path prefix
+# to the backend origin. Trunk forwards the request verbatim (method, body,
+# headers) and streams the response back.
+[[proxy]]
+rewrite = "/api"
+backend = "http://127.0.0.1:8081/api"
+
+[[proxy]]
+rewrite = "/healthz"
+backend = "http://127.0.0.1:8081/healthz"
+
+[[proxy]]
+rewrite = "/readyz"
+backend = "http://127.0.0.1:8081/readyz"
+
+# Watch these paths for changes that should trigger a rebuild.
+# Note: Trunk 0.22.0-beta.1 has a TOML parse bug with [[watch]] — upgrade
+# to 0.22.0-beta.2+ or stable before re-enabling these lines.
+# [[watch]]
+# path = "src"
+# [[watch]]
+# path = "../status-server/src"

@@ -1,0 +1,70 @@
+[package]
+name = "common"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "common"
+path = "src/lib.rs"
+
+[dependencies]
+
+# Crypto (auth, signing, encryption)
+aes-gcm = { workspace = true }
+
+# Serialization
+async-trait = { workspace = true }
+
+# HTTP stack (custom hyper-util client + SSRF-safe connector)
+axum = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true }
+dashmap.workspace = true
+
+# Error handling
+eyre = { workspace = true }
+futures = { workspace = true }
+
+# DNS (custom caching resolver)
+hickory-resolver = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true }
+hyper-rustls = { workspace = true }
+hyper-util = { workspace = true }
+
+# Email
+lettre = { workspace = true }
+
+# Observability (tracing + metrics + OTLP export)
+metrics = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+parking_lot = { workspace = true }
+
+# HTTP client (webhook notifier)
+reqwest = { workspace = true, features = ["form"] }
+
+# TLS
+rustls = { workspace = true }
+secrecy = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+statuscore = { path = "../core" }
+thiserror = { workspace = true }
+# Async runtime
+tokio = { workspace = true }
+# tower::Service is implemented by the SSRF HTTP connector; axum is used by the
+# per-route HTTP metrics middleware. Both are inherited from the workspace.
+tower = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+zeroize = { workspace = true }
+
+[lints]
+workspace = true
