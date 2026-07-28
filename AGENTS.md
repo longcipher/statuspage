@@ -21,7 +21,7 @@
 - Ensure `.cargo/config.toml` contains:
   ```toml
   [build]
-  rustc-wrapper = "sccache"
+  rustc-wrapper = "kache"
   ```
 
 ## Cargo Workspace Rules (Critical)

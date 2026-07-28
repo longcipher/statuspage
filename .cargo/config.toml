@@ -1,7 +1,7 @@
 [build]
 pipelining = true
 jobs = 10
-rustc-wrapper = "sccache"
+rustc-wrapper = "kache"
 
 # Linker selection lives here (not in a justfile RUSTFLAGS export) so every
 # entrypoint — `just`, bare `cargo`, rust-analyzer, CI — shares ONE

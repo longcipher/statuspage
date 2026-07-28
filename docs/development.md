@@ -204,7 +204,7 @@ just check     # cargo check --workspace — the compile gate
   bare `cargo`, and rust-analyzer share one build fingerprint. A Linux build
   needs `mold` installed — `just setup`. macOS is opt-in (`just setup` prints
   the `lld` snippet for `~/.cargo/config.toml`).
-- **sccache**: `.cargo/config.toml` sets `rustc-wrapper = "sccache"`. Useful for
+- **kache**: `.cargo/config.toml` sets `rustc-wrapper = "kache"`. Useful for
   CI; on macOS it can deadlock the cold lib compile, so prefer incremental for
   local iteration.
 - **Incremental**: set `incremental = true` in `~/.cargo/config.toml`
