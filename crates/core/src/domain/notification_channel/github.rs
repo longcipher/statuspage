@@ -1,0 +1,51 @@
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+
+use super::ChannelKind;
+use super::transport::{MASK, TransportConfig, require_https};
+
+fn default_github_api_url() -> String {
+    "https://api.github.com".into()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct GitHubConfig {
+    /// Repository (owner/repo).
+    pub repo: String,
+    /// Personal access token.
+    pub token: String,
+    /// GitHub API base URL.
+    #[serde(default = "default_github_api_url")]
+    pub api_url: String,
+}
+
+impl TransportConfig for GitHubConfig {
+    const KIND: ChannelKind = ChannelKind::GitHub;
+
+    fn redact_in_place(&mut self) {
+        self.token = MASK.to_string();
+    }
+
+    fn has_redaction_sentinel(&self) -> bool {
+        self.token == MASK
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.repo.trim().is_empty() || !self.repo.contains('/') {
+            return Err("repo must be in owner/repo format".into());
+        }
+        if self.token.trim().is_empty() {
+            return Err("token is required".into());
+        }
+        require_https(&self.api_url, "api_url")?;
+        Ok(())
+    }
+
+    fn abuse_url(&self) -> Option<&str> {
+        Some(&self.api_url)
+    }
+
+    fn operator_managed(&self) -> bool {
+        false
+    }
+}

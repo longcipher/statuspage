@@ -6,7 +6,9 @@
 //! Bearer-auth for CLI/automation. CSRF is enforced on browser mutations
 //! via a custom header (`X-Requested-With`).
 
+pub mod basic_auth;
 pub mod middleware;
+pub mod oidc;
 pub mod routes;
 pub mod service;
 

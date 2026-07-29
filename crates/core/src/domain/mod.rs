@@ -1,8 +1,10 @@
 pub mod agent_wire;
 pub mod alert;
+pub mod announcement;
 pub mod api_token;
 pub mod check;
 pub mod check_error;
+pub mod condition_dsl;
 pub mod escalation_policy;
 pub mod extras;
 pub mod incident;
@@ -24,6 +26,7 @@ pub mod result;
 pub mod serde_helpers;
 pub mod session;
 pub mod silence;
+pub mod sla;
 pub mod status_page;
 pub mod subscriber;
 pub mod target;
@@ -34,17 +37,22 @@ pub mod word_lists;
 pub mod write_source;
 
 pub use alert::{AlertBinding, TargetAlerts};
+pub use announcement::{Announcement, AnnouncementSeverity, NewAnnouncement};
 pub use api_token::{
     ApiTokenInfo, ApiTokenLookupOutcome, ApiTokenRow, CreatedApiToken, NewApiToken, Scope,
     ScopeSet, TOKEN_PREFIX as API_TOKEN_PREFIX, TokenUpdate as ApiTokenUpdate,
     generate_raw_token as generate_api_token, slice_prefix as slice_api_token_prefix,
 };
 pub use check::{
-    CheckSpec, CheckSpecError, DnsCheck, DnsRecordType, DomainExpiryCheck, ExpectedStatus,
-    FlowCheck, FlowStep, HeartbeatCheck, HttpCheck, HttpMethod, PingCheck, TcpCheck, TlsCertCheck,
-    min_interval_secs_for_kind, reduced_domain_hint, registered_domain,
+    BodyCondition, CheckSpec, CheckSpecError, DnsCheck, DnsRcode, DnsRecordType, DomainExpiryCheck,
+    ExpectedStatus, FlowCheck, FlowStep, GrpcCheck, HeartbeatCheck, HttpCheck, HttpMethod,
+    PingCheck, SshCheck, StarttlsCheck, SuiteCheck, SuiteStep, TcpCheck, TlsCertCheck, UdpCheck,
+    WebSocketCheck, min_interval_secs_for_kind, reduced_domain_hint, registered_domain,
 };
 pub use check_error::humanize_check_error;
+pub use condition_dsl::{
+    Comparator, ConditionContext, ConditionExpr, ConditionParseError, DslCondition, ValueRef,
+};
 pub use escalation_policy::{
     EscalationDecision, EscalationPolicy, EscalationPolicySummary, EscalationStep,
     EscalationTarget, EscalationTargetType, IncidentEscalationState, NewEscalationPolicy,
@@ -71,11 +79,15 @@ pub use monitor_share::{
     CreatedShare, MonitorShare, MonitorShareId, NewMonitorShare, ResolvedShare,
 };
 pub use notification_channel::{
-    ChannelConfig, ChannelKind, DiscordConfig, EmailConfig, GoogleChatConfig, MAX_CHANNEL_NAME_LEN,
-    MsTeamsConfig, NewNotificationChannel, NotificationChannel, NotificationChannelUpdate,
-    NtfyConfig, PagerDutyConfig, PushoverConfig, SlackConfig, SmsConfig, TelegramAppConfig,
-    TelegramConfig, TransportConfig, WebhookConfig, WhatsAppAppConfig, WhatsAppConfig,
-    validate_channel_name,
+    AwsSesConfig, ChannelConfig, ChannelKind, ClickUpConfig, DatadogConfig, DiscordConfig,
+    EmailConfig, GitHubConfig, GitLabConfig, GiteaConfig, GoogleChatConfig, GotifyConfig,
+    HomeAssistantConfig, IFTTTConfig, IlertConfig, IncidentioConfig, LineConfig,
+    MAX_CHANNEL_NAME_LEN, MatrixConfig, MattermostConfig, MsTeamsConfig, N8nConfig,
+    NewNotificationChannel, NewRelicConfig, NotificationChannel, NotificationChannelUpdate,
+    NtfyConfig, OpsgenieConfig, PagerDutyConfig, PushoverConfig, RocketchatConfig, SIGNL4Config,
+    SendGridConfig, SignalConfig, SlackConfig, SmsConfig, SplunkConfig, SquadcastConfig,
+    TelegramAppConfig, TelegramConfig, TransportConfig, WebexConfig, WebhookConfig,
+    WhatsAppAppConfig, WhatsAppConfig, ZapierConfig, ZulipConfig, validate_channel_name,
 };
 pub use oauth::{
     ConsumedOauthState, OauthIdentity, OauthProvider, RemoteIdentity,
@@ -107,6 +119,7 @@ pub use session::{
     generate_cookie_value, hash_cookie_value,
 };
 pub use silence::{NewSilenceRule, SilenceFilter, SilenceRule, SilenceRuleUpdate};
+pub use sla::{SlaStatus, SlaTarget};
 pub use status_page::{
     NewStatusPage, NewStatusPageComponent, PageRef, StatusPage, StatusPageComponent,
     StatusPageComponentUpdate, StatusPageId, StatusPageUpdate,

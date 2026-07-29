@@ -1,8 +1,3 @@
-#![expect(dead_code)]
-// Agent-only probe: the control plane rejects these check kinds via
-// `require_control_plane_support()` before reaching this code. Kept as
-// the implementation site for a future agent runtime.
-
 //! TLS certificate expiry probe.
 //!
 //! Connects to `host:port`, completes a TLS handshake, parses the server's

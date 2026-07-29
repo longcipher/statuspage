@@ -24,6 +24,7 @@ base64 = { workspace = true }
 chrono = { workspace = true }
 chrono-tz = { workspace = true }
 common = { path = "../../crates/common" }
+config = { workspace = true }
 dashmap = { workspace = true }
 hex = { workspace = true }
 hickory-resolver = { workspace = true, optional = true }

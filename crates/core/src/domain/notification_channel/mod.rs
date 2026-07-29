@@ -20,37 +20,93 @@
 //! storage edge, and secrets are never echoed back by the API — see
 //! [`ChannelConfig::redacted`].
 
+// ToSchema derive on ChannelConfig generates large stack arrays for the
+// oneOf schema. This is auto-generated code we can't control.
+#![expect(clippy::large_stack_arrays)]
+
+mod awsses;
+mod clickup;
+mod datadog;
 mod discord;
 mod email;
+mod gitea;
+mod github;
+mod gitlab;
 mod google_chat;
+mod gotify;
+mod homeassistant;
+mod ifttt;
+mod ilert;
+mod incidentio;
+mod line;
+mod matrix;
+mod mattermost;
 mod msteams;
+mod n8n;
+mod newrelic;
 mod ntfy;
+mod opsgenie;
 mod pagerduty;
 mod pushover;
+mod rocketchat;
+mod sendgrid;
+mod signal;
+mod signl4;
 mod slack;
 mod sms;
+mod splunk;
+mod squadcast;
 mod telegram;
 mod telegram_app;
 mod transport;
+mod webex;
 mod webhook;
 mod whatsapp;
 mod whatsapp_app;
+mod zapier;
+mod zulip;
 
+pub use awsses::AwsSesConfig;
+pub use clickup::ClickUpConfig;
+pub use datadog::DatadogConfig;
 pub use discord::DiscordConfig;
 pub use email::EmailConfig;
+pub use gitea::GiteaConfig;
+pub use github::GitHubConfig;
+pub use gitlab::GitLabConfig;
 pub use google_chat::GoogleChatConfig;
+pub use gotify::GotifyConfig;
+pub use homeassistant::HomeAssistantConfig;
+pub use ifttt::IFTTTConfig;
+pub use ilert::IlertConfig;
+pub use incidentio::IncidentioConfig;
+pub use line::LineConfig;
+pub use matrix::MatrixConfig;
+pub use mattermost::MattermostConfig;
 pub use msteams::MsTeamsConfig;
+pub use n8n::N8nConfig;
+pub use newrelic::NewRelicConfig;
 pub use ntfy::NtfyConfig;
+pub use opsgenie::OpsgenieConfig;
 pub use pagerduty::PagerDutyConfig;
 pub use pushover::PushoverConfig;
+pub use rocketchat::RocketchatConfig;
+pub use sendgrid::SendGridConfig;
+pub use signal::SignalConfig;
+pub use signl4::SIGNL4Config;
 pub use slack::SlackConfig;
 pub use sms::SmsConfig;
+pub use splunk::SplunkConfig;
+pub use squadcast::SquadcastConfig;
 pub use telegram::TelegramConfig;
 pub use telegram_app::TelegramAppConfig;
 pub use transport::TransportConfig;
+pub use webex::WebexConfig;
 pub use webhook::WebhookConfig;
 pub use whatsapp::WhatsAppConfig;
 pub use whatsapp_app::WhatsAppAppConfig;
+pub use zapier::ZapierConfig;
+pub use zulip::ZulipConfig;
 
 use super::WriteSource;
 use chrono::{DateTime, Utc};
@@ -81,6 +137,40 @@ pub enum ChannelKind {
     Ntfy,
     Pushover,
     Sms,
+    Opsgenie,
+    Gotify,
+    Matrix,
+    Mattermost,
+    Rocketchat,
+    Webex,
+    Zulip,
+    #[serde(rename = "github")]
+    GitHub,
+    #[serde(rename = "gitlab")]
+    GitLab,
+    Gitea,
+    Ilert,
+    Incidentio,
+    Squadcast,
+    #[serde(rename = "signl4")]
+    SIGNL4,
+    Datadog,
+    #[serde(rename = "newrelic")]
+    NewRelic,
+    Splunk,
+    Line,
+    Signal,
+    #[serde(rename = "clickup")]
+    ClickUp,
+    Ifttt,
+    Zapier,
+    N8n,
+    #[serde(rename = "homeassistant")]
+    HomeAssistant,
+    #[serde(rename = "awsses")]
+    AwsSes,
+    #[serde(rename = "sendgrid")]
+    SendGrid,
 }
 
 impl ChannelKind {
@@ -102,6 +192,32 @@ impl ChannelKind {
         Self::Ntfy,
         Self::Pushover,
         Self::Sms,
+        Self::Opsgenie,
+        Self::Gotify,
+        Self::Matrix,
+        Self::Mattermost,
+        Self::Rocketchat,
+        Self::Webex,
+        Self::Zulip,
+        Self::GitHub,
+        Self::GitLab,
+        Self::Gitea,
+        Self::Ilert,
+        Self::Incidentio,
+        Self::Squadcast,
+        Self::SIGNL4,
+        Self::Datadog,
+        Self::NewRelic,
+        Self::Splunk,
+        Self::Line,
+        Self::Signal,
+        Self::ClickUp,
+        Self::Ifttt,
+        Self::Zapier,
+        Self::N8n,
+        Self::HomeAssistant,
+        Self::AwsSes,
+        Self::SendGrid,
     ];
 
     /// Stable string used in the storage-layer `kind` CHECK constraint and
@@ -122,6 +238,32 @@ impl ChannelKind {
             Self::Ntfy => "ntfy",
             Self::Pushover => "pushover",
             Self::Sms => "sms",
+            Self::Opsgenie => "opsgenie",
+            Self::Gotify => "gotify",
+            Self::Matrix => "matrix",
+            Self::Mattermost => "mattermost",
+            Self::Rocketchat => "rocketchat",
+            Self::Webex => "webex",
+            Self::Zulip => "zulip",
+            Self::GitHub => "github",
+            Self::GitLab => "gitlab",
+            Self::Gitea => "gitea",
+            Self::Ilert => "ilert",
+            Self::Incidentio => "incidentio",
+            Self::Squadcast => "squadcast",
+            Self::SIGNL4 => "signl4",
+            Self::Datadog => "datadog",
+            Self::NewRelic => "newrelic",
+            Self::Splunk => "splunk",
+            Self::Line => "line",
+            Self::Signal => "signal",
+            Self::ClickUp => "clickup",
+            Self::Ifttt => "ifttt",
+            Self::Zapier => "zapier",
+            Self::N8n => "n8n",
+            Self::HomeAssistant => "homeassistant",
+            Self::AwsSes => "awsses",
+            Self::SendGrid => "sendgrid",
         }
     }
 }
@@ -152,6 +294,40 @@ pub enum ChannelConfig {
     Ntfy(NtfyConfig),
     Pushover(PushoverConfig),
     Sms(SmsConfig),
+    Opsgenie(OpsgenieConfig),
+    Gotify(GotifyConfig),
+    Matrix(MatrixConfig),
+    Mattermost(MattermostConfig),
+    Rocketchat(RocketchatConfig),
+    Webex(WebexConfig),
+    Zulip(ZulipConfig),
+    #[serde(rename = "github")]
+    GitHub(GitHubConfig),
+    #[serde(rename = "gitlab")]
+    GitLab(GitLabConfig),
+    Gitea(GiteaConfig),
+    Ilert(IlertConfig),
+    Incidentio(IncidentioConfig),
+    Squadcast(SquadcastConfig),
+    #[serde(rename = "signl4")]
+    SIGNL4(SIGNL4Config),
+    Datadog(DatadogConfig),
+    #[serde(rename = "newrelic")]
+    NewRelic(NewRelicConfig),
+    Splunk(SplunkConfig),
+    Line(LineConfig),
+    Signal(SignalConfig),
+    #[serde(rename = "clickup")]
+    ClickUp(ClickUpConfig),
+    Ifttt(IFTTTConfig),
+    Zapier(ZapierConfig),
+    N8n(N8nConfig),
+    #[serde(rename = "homeassistant")]
+    HomeAssistant(HomeAssistantConfig),
+    #[serde(rename = "awsses")]
+    AwsSes(AwsSesConfig),
+    #[serde(rename = "sendgrid")]
+    SendGrid(SendGridConfig),
 }
 
 /// Apply `$body` to the inner [`TransportConfig`] of any variant. The one
@@ -173,6 +349,32 @@ macro_rules! with_transport {
             ChannelConfig::Ntfy($c) => $body,
             ChannelConfig::Pushover($c) => $body,
             ChannelConfig::Sms($c) => $body,
+            ChannelConfig::Opsgenie($c) => $body,
+            ChannelConfig::Gotify($c) => $body,
+            ChannelConfig::Matrix($c) => $body,
+            ChannelConfig::Mattermost($c) => $body,
+            ChannelConfig::Rocketchat($c) => $body,
+            ChannelConfig::Webex($c) => $body,
+            ChannelConfig::Zulip($c) => $body,
+            ChannelConfig::GitHub($c) => $body,
+            ChannelConfig::GitLab($c) => $body,
+            ChannelConfig::Gitea($c) => $body,
+            ChannelConfig::Ilert($c) => $body,
+            ChannelConfig::Incidentio($c) => $body,
+            ChannelConfig::Squadcast($c) => $body,
+            ChannelConfig::SIGNL4($c) => $body,
+            ChannelConfig::Datadog($c) => $body,
+            ChannelConfig::NewRelic($c) => $body,
+            ChannelConfig::Splunk($c) => $body,
+            ChannelConfig::Line($c) => $body,
+            ChannelConfig::Signal($c) => $body,
+            ChannelConfig::ClickUp($c) => $body,
+            ChannelConfig::Ifttt($c) => $body,
+            ChannelConfig::Zapier($c) => $body,
+            ChannelConfig::N8n($c) => $body,
+            ChannelConfig::HomeAssistant($c) => $body,
+            ChannelConfig::AwsSes($c) => $body,
+            ChannelConfig::SendGrid($c) => $body,
         }
     };
 }
@@ -323,6 +525,32 @@ mod tests {
             r#"{"type":"sms","provider":"plivo","to":"+15551234567","from":"+15557654321","auth_id":"MAXXXXXXXXXXXXXXXXXX","auth_token":"tok"}"#,
             r#"{"type":"sms","provider":"sinch","to":"+15551234567","from":"Acme","service_plan_id":"abc123","api_token":"tok"}"#,
             r#"{"type":"sms","provider":"sinch","to":"+15551234567","from":"Acme","service_plan_id":"abc123","api_token":"tok","region":"eu"}"#,
+            r#"{"type":"opsgenie","api_key":"tok","region":"us"}"#,
+            r#"{"type":"gotify","server_url":"https://gotify.example.com","app_token":"tok"}"#,
+            r#"{"type":"matrix","homeserver_url":"https://matrix.org","access_token":"tok","room_id":"!abc:matrix.org"}"#,
+            r#"{"type":"mattermost","webhook_url":"https://mattermost.example.com/hooks/abc"}"#,
+            r#"{"type":"rocketchat","webhook_url":"https://rocketchat.example.com/hooks/abc"}"#,
+            r#"{"type":"webex","webhook_url":"https://webexapis.com/v1/webhooks/abc"}"#,
+            r#"{"type":"zulip","server_url":"https://zulip.example.com","email":"bot@zulip.com","api_key":"key","stream":"alerts","topic":"status"}"#,
+            r#"{"type":"github","repo":"owner/repo","token":"tok","api_url":"https://api.github.com"}"#,
+            r#"{"type":"gitlab","repo":"owner/repo","token":"tok","api_url":"https://gitlab.com/api/v4"}"#,
+            r#"{"type":"gitea","repo":"owner/repo","token":"tok","api_url":"https://gitea.com/api/v1"}"#,
+            r#"{"type":"ilert","api_key":"tok"}"#,
+            r#"{"type":"incidentio","api_key":"tok"}"#,
+            r#"{"type":"squadcast","webhook_url":"https://squadcast.com/webhook/abc"}"#,
+            r#"{"type":"signl4","webhook_url":"https://connect.signl4.com/webhook/abc","secret":"secret"}"#,
+            r#"{"type":"datadog","api_key":"ak","app_key":"appk"}"#,
+            r#"{"type":"newrelic","api_key":"tok","account_id":"123"}"#,
+            r#"{"type":"splunk","hec_url":"https://splunk.example.com/services/collector","hec_token":"tok"}"#,
+            r#"{"type":"line","channel_access_token":"tok"}"#,
+            r#"{"type":"signal","phone_number":"+15551234567","api_url":"https://signal.example.com"}"#,
+            r#"{"type":"clickup","webhook_url":"https://clickup.example.com/webhook/abc"}"#,
+            r#"{"type":"ifttt","webhook_key":"key","event_name":"alert"}"#,
+            r#"{"type":"zapier","webhook_url":"https://hooks.zapier.com/hooks/catch/abc"}"#,
+            r#"{"type":"n8n","webhook_url":"https://n8n.example.com/webhook/abc"}"#,
+            r#"{"type":"homeassistant","webhook_url":"https://ha.example.com/api/webhook/abc"}"#,
+            r#"{"type":"awsses","region":"us-east-1","from_address":"alerts@example.com"}"#,
+            r#"{"type":"sendgrid","api_key":"tok","from_address":"alerts@example.com"}"#,
         ] {
             let c: ChannelConfig = serde_json::from_str(json).unwrap();
             let back = serde_json::to_string(&c).unwrap();
@@ -386,6 +614,94 @@ mod tests {
                 from: "+15557654321".into(),
                 account_sid: "AC0123456789ABCDEF0123456789ABCDEF".into(),
                 auth_token: "tok".into(),
+            }),
+            ChannelConfig::Opsgenie(OpsgenieConfig { api_key: "tok".into(), region: "us".into() }),
+            ChannelConfig::Gotify(GotifyConfig {
+                server_url: "https://gotify.example.com".into(),
+                app_token: "tok".into(),
+            }),
+            ChannelConfig::Matrix(MatrixConfig {
+                homeserver_url: "https://matrix.org".into(),
+                access_token: "tok".into(),
+                room_id: "!abc:matrix.org".into(),
+            }),
+            ChannelConfig::Mattermost(MattermostConfig {
+                webhook_url: "https://mattermost.example.com/hooks/abc".into(),
+            }),
+            ChannelConfig::Rocketchat(RocketchatConfig {
+                webhook_url: "https://rocketchat.example.com/hooks/abc".into(),
+            }),
+            ChannelConfig::Webex(WebexConfig {
+                webhook_url: "https://webexapis.com/v1/webhooks/abc".into(),
+            }),
+            ChannelConfig::Zulip(ZulipConfig {
+                server_url: "https://zulip.example.com".into(),
+                email: "bot@zulip.com".into(),
+                api_key: "key".into(),
+                stream: "alerts".into(),
+                topic: "status".into(),
+            }),
+            ChannelConfig::GitHub(GitHubConfig {
+                repo: "owner/repo".into(),
+                token: "tok".into(),
+                api_url: "https://api.github.com".into(),
+            }),
+            ChannelConfig::GitLab(GitLabConfig {
+                repo: "owner/repo".into(),
+                token: "tok".into(),
+                api_url: "https://gitlab.com/api/v4".into(),
+            }),
+            ChannelConfig::Gitea(GiteaConfig {
+                repo: "owner/repo".into(),
+                token: "tok".into(),
+                api_url: "https://gitea.com/api/v1".into(),
+            }),
+            ChannelConfig::Ilert(IlertConfig { api_key: "tok".into() }),
+            ChannelConfig::Incidentio(IncidentioConfig { api_key: "tok".into() }),
+            ChannelConfig::Squadcast(SquadcastConfig {
+                webhook_url: "https://squadcast.com/webhook/abc".into(),
+            }),
+            ChannelConfig::SIGNL4(SIGNL4Config {
+                webhook_url: "https://connect.signl4.com/webhook/abc".into(),
+                secret: "secret".into(),
+            }),
+            ChannelConfig::Datadog(DatadogConfig { api_key: "ak".into(), app_key: "appk".into() }),
+            ChannelConfig::NewRelic(NewRelicConfig {
+                api_key: "tok".into(),
+                account_id: "123".into(),
+            }),
+            ChannelConfig::Splunk(SplunkConfig {
+                hec_url: "https://splunk.example.com/services/collector".into(),
+                hec_token: "tok".into(),
+            }),
+            ChannelConfig::Line(LineConfig { channel_access_token: "tok".into() }),
+            ChannelConfig::Signal(SignalConfig {
+                phone_number: "+15551234567".into(),
+                api_url: "https://signal.example.com".into(),
+            }),
+            ChannelConfig::ClickUp(ClickUpConfig {
+                webhook_url: "https://clickup.example.com/webhook/abc".into(),
+            }),
+            ChannelConfig::Ifttt(IFTTTConfig {
+                webhook_key: "key".into(),
+                event_name: "alert".into(),
+            }),
+            ChannelConfig::Zapier(ZapierConfig {
+                webhook_url: "https://hooks.zapier.com/hooks/catch/abc".into(),
+            }),
+            ChannelConfig::N8n(N8nConfig {
+                webhook_url: "https://n8n.example.com/webhook/abc".into(),
+            }),
+            ChannelConfig::HomeAssistant(HomeAssistantConfig {
+                webhook_url: "https://ha.example.com/api/webhook/abc".into(),
+            }),
+            ChannelConfig::AwsSes(AwsSesConfig {
+                region: "us-east-1".into(),
+                from_address: "alerts@example.com".into(),
+            }),
+            ChannelConfig::SendGrid(SendGridConfig {
+                api_key: "tok".into(),
+                from_address: "alerts@example.com".into(),
             }),
         ];
         assert_eq!(configs.len(), ChannelKind::ALL.len());

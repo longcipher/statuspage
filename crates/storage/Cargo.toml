@@ -16,6 +16,7 @@ chrono = { workspace = true }
 common = { version = "0.1.0", path = "../common" }
 duckdb = { workspace = true, features = ["chrono", "uuid", "serde_json", "json"] }
 hex.workspace = true
+moka = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

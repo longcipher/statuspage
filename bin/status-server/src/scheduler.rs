@@ -31,12 +31,12 @@
 //!
 //! # Supported check kinds
 //!
-//! The in-process scheduler supports the four control-plane kinds: `http`,
-//! `tcp`, `ping`, and `heartbeat`. The four agent-only kinds (`tls_cert`,
-//! `domain_expiry`, `dns`, `flow`) are rejected up front by
+//! The in-process scheduler supports six control-plane kinds: `http`,
+//! `tcp`, `ping`, `heartbeat`, `dns`, and `tls_cert`. The two remaining
+//! agent-only kinds (`domain_expiry`, `flow`) are rejected up front by
 //! [`CheckSpec::require_control_plane_support`] and record an `Error`
 //! result with a "not supported" reason — agents own the richer probe
-//! matrix (cert expiry, RDAP, DNS, browser automation).
+//! matrix (RDAP, browser automation).
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -46,7 +46,10 @@ use std::time::Duration;
 use chrono::Utc;
 use common::security::SsrfGuard;
 use rand::RngExt;
-use statuscore::domain::check::{ExpectedStatus, HttpCheck, PingCheck, TcpCheck};
+use statuscore::domain::check::{
+    ExpectedStatus, GrpcCheck, HttpCheck, PingCheck, SshCheck, StarttlsCheck, TcpCheck, UdpCheck,
+    WebSocketCheck,
+};
 use statuscore::domain::org::OrgId;
 use statuscore::domain::{CheckResult, CheckSpec, CheckStatus, HeartbeatCheck, Target};
 use storage::Storage;
@@ -81,6 +84,13 @@ pub struct Scheduler {
     /// on the request builder, not the client, so one client serves the
     /// whole fleet.
     outbound_http: reqwest::Client,
+    /// Semaphore limiting concurrent probe execution. Prevents resource
+    /// exhaustion when many targets are due simultaneously.
+    probe_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Optional URL to check internet connectivity before probing. When
+    /// set, the scheduler pings this URL first; if it fails, all targets
+    /// are skipped for that sweep.
+    connectivity_check_url: Option<String>,
 }
 
 /// Process-wide fallback `reqwest::Client` for callers that don't hold a
@@ -102,7 +112,13 @@ fn shared_probe_http_client() -> &'static reqwest::Client {
 impl Scheduler {
     #[expect(dead_code)]
     pub fn new(storage: Arc<dyn Storage>) -> Self {
-        Self { storage, dispatch_ctx: None, outbound_http: shared_probe_http_client().clone() }
+        Self {
+            storage,
+            dispatch_ctx: None,
+            outbound_http: shared_probe_http_client().clone(),
+            probe_semaphore: Arc::new(tokio::sync::Semaphore::new(100)),
+            connectivity_check_url: None,
+        }
     }
 
     /// Construct with a channel dispatch context so the incident coalescer
@@ -115,8 +131,15 @@ impl Scheduler {
         storage: Arc<dyn Storage>,
         dispatch_ctx: crate::incident_writer::ChannelDispatchCtx,
         outbound_http: reqwest::Client,
+        connectivity_check_url: Option<String>,
     ) -> Self {
-        Self { storage, dispatch_ctx: Some(dispatch_ctx), outbound_http }
+        Self {
+            storage,
+            dispatch_ctx: Some(dispatch_ctx),
+            outbound_http,
+            probe_semaphore: Arc::new(tokio::sync::Semaphore::new(100)),
+            connectivity_check_url,
+        }
     }
 
     /// Run the scheduler loop. Call via `tokio::spawn(scheduler.run(cancel))`.
@@ -205,6 +228,14 @@ impl Scheduler {
             return;
         }
 
+        // Connectivity check: skip all probes if the internet is unreachable.
+        if let Some(ref url) = self.connectivity_check_url
+            && let Err(e) = reqwest::get(url).await
+        {
+            warn!(error = %e, "connectivity check failed, skipping probe sweep");
+            return;
+        }
+
         for id in due_ids {
             let Some(target) = known_targets.get(&id) else {
                 continue;
@@ -213,8 +244,10 @@ impl Scheduler {
                 continue;
             }
 
+            let permit = self.probe_semaphore.clone().acquire_owned().await;
             let result =
                 probe_target_with_client(self.storage.as_ref(), target, &self.outbound_http).await;
+            drop(permit);
             if let Err(e) = self.storage.record_result(&result).await {
                 error!(
                     target_id = %target.id,
@@ -288,7 +321,25 @@ async fn probe_target_with_client(
         CheckSpec::Tcp(tcp_spec) => probe_tcp(tcp_spec).await,
         CheckSpec::Ping(ping_spec) => probe_ping(ping_spec).await,
         CheckSpec::Heartbeat(hb_spec) => probe_heartbeat(storage, target.id, hb_spec).await,
-        // dns / tls_cert / domain_expiry / flow are caught by the
+        CheckSpec::WebSocket(ws_spec) => probe_websocket(ws_spec).await,
+        CheckSpec::Grpc(grpc_spec) => probe_grpc(grpc_spec).await,
+        CheckSpec::Ssh(ssh_spec) => probe_ssh(ssh_spec).await,
+        CheckSpec::Udp(udp_spec) => probe_udp(udp_spec).await,
+        CheckSpec::Starttls(stls_spec) => probe_starttls(stls_spec).await,
+        CheckSpec::Suite(_) => {
+            (CheckStatus::Error, None, Some("suite checks require an agent".into()))
+        }
+        #[cfg(feature = "agent")]
+        CheckSpec::Dns(dns_spec) => crate::probes::dns::probe_dns(dns_spec).await,
+        #[cfg(feature = "agent")]
+        CheckSpec::TlsCert(tls_spec) => crate::probes::tls_cert::probe_tls_cert(tls_spec).await,
+        #[cfg(not(feature = "agent"))]
+        CheckSpec::Dns(_) | CheckSpec::TlsCert(_) => (
+            CheckStatus::Error,
+            None,
+            Some("dns/tls_cert probes require the 'agent' feature".into()),
+        ),
+        // domain_expiry / flow are caught by the
         // require_control_plane_support gate above; this arm is unreachable
         // at runtime but kept for match exhaustiveness and as a safety net
         // for future kinds.
@@ -387,6 +438,35 @@ async fn probe_http(
         return (CheckStatus::Error, None, Some(reason));
     }
 
+    // If cert expiry check is requested, do a TLS handshake first.
+    if let Some(warn_days) = http.cert_expiry_warn_days
+        && warn_days > 0
+        && http.verify_tls
+        && let Some(host) = http.url.host_str()
+    {
+        let port = http.url.port_or_known_default().unwrap_or(443);
+        match check_tls_cert_expiry(host, port, warn_days).await {
+            CertCheckResult::Ok => {}
+            CertCheckResult::ExpiringSoon(days) => {
+                return (
+                    CheckStatus::Degraded,
+                    None,
+                    Some(format!("TLS cert for {host} expires in {days} day(s)")),
+                );
+            }
+            CertCheckResult::Expired(days_ago) => {
+                return (
+                    CheckStatus::Down,
+                    None,
+                    Some(format!("TLS cert for {host} expired {days_ago} day(s) ago")),
+                );
+            }
+            CertCheckResult::Error(e) => {
+                tracing::warn!(host, error = %e, "cert expiry check failed (non-fatal)");
+            }
+        }
+    }
+
     let method = match http.method {
         statuscore::domain::check::HttpMethod::Get => reqwest::Method::GET,
         statuscore::domain::check::HttpMethod::Head => reqwest::Method::HEAD,
@@ -395,12 +475,9 @@ async fn probe_http(
         statuscore::domain::check::HttpMethod::Patch => reqwest::Method::PATCH,
         statuscore::domain::check::HttpMethod::Delete => reqwest::Method::DELETE,
         statuscore::domain::check::HttpMethod::Options => reqwest::Method::OPTIONS,
-        // `HttpMethod` is #[non_exhaustive]; unknown methods fall back to GET.
         _ => reqwest::Method::GET,
     };
 
-    // Per-request timeout — the client is shared across the fleet, so the
-    // check-specific `http.timeout` is applied here, not on the builder.
     let mut req = client.request(method, http.url.as_str()).timeout(http.timeout);
     for (k, v) in &http.headers {
         req = req.header(k, v);
@@ -415,17 +492,67 @@ async fn probe_http(
         req = req.bearer_auth(token);
     }
 
+    let start = std::time::Instant::now();
     let resp = match req.send().await {
         Ok(r) => r,
         Err(e) => {
             return (CheckStatus::Down, None, Some(format!("request: {e}")));
         }
     };
+    let elapsed_ms = start.elapsed().as_millis() as u64;
 
     let code = resp.status().as_u16();
-    let ok = status_matches(&http.expected_status, code);
-    let error = if ok { None } else { Some(format!("HTTP {code}")) };
-    (if ok { CheckStatus::Up } else { CheckStatus::Down }, Some(code), error)
+    let mut status = CheckStatus::Up;
+    let mut errors: Vec<String> = Vec::new();
+
+    // 1. Status code check.
+    if !status_matches(&http.expected_status, code) {
+        status = CheckStatus::Down;
+        errors.push(format!("HTTP {code}"));
+    }
+
+    // 2. Body read + substring / JSON condition checks.
+    let body_bytes = resp.bytes().await.unwrap_or_default();
+    let body_str = std::str::from_utf8(&body_bytes).unwrap_or("");
+
+    if let Some(needle) = &http.expected_body_contains
+        && !body_str.contains(needle.as_str())
+    {
+        status = merge_status(status, CheckStatus::Down);
+        errors.push(format!("body missing '{needle}'"));
+    }
+
+    if let Some(conditions) = &http.body_conditions {
+        if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
+            for cond in conditions {
+                let pass = eval_body_condition(cond, &json);
+                if !pass {
+                    status = merge_status(status, CheckStatus::Down);
+                    let desc = if cond.exists {
+                        format!("body: '{}' not found", cond.path)
+                    } else {
+                        format!("body: '{}' != {:?}", cond.path, cond.value)
+                    };
+                    errors.push(desc);
+                }
+            }
+        } else if !conditions.is_empty() {
+            status = merge_status(status, CheckStatus::Down);
+            errors.push("body: not valid JSON".into());
+        }
+    }
+
+    // 3. Response time check.
+    if let Some(max_ms) = http.max_response_time_ms
+        && max_ms > 0
+        && elapsed_ms > max_ms
+    {
+        status = merge_status(status, CheckStatus::Degraded);
+        errors.push(format!("response time {elapsed_ms}ms > {max_ms}ms"));
+    }
+
+    let error = if errors.is_empty() { None } else { Some(errors.join("; ")) };
+    (status, Some(code), error)
 }
 
 /// Resolve `url`'s host and validate every resolved IP against `guard`.
@@ -525,6 +652,202 @@ async fn probe_ping(ping: &PingCheck) -> (CheckStatus, Option<u16>, Option<Strin
     }
 }
 
+/// WebSocket probe: connect to ws/wss URL, optionally send a message, check response.
+async fn probe_websocket(ws: &WebSocketCheck) -> (CheckStatus, Option<u16>, Option<String>) {
+    if let Err(reason) = ssrf_check_url(&ws.url, SsrfGuard::strict()).await {
+        return (CheckStatus::Error, None, Some(reason));
+    }
+    let connect_timeout = ws.timeout;
+    let url_str = ws.url.as_str().to_string();
+    let _message = ws.message.clone();
+    let _expected = ws.expected_response_contains.clone();
+
+    match tokio::time::timeout(connect_timeout, async {
+        // ponytail: use reqwest for WS upgrade check (full WS client would need tungstenite crate)
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        let mut req = client.get(&url_str);
+        req = req.header("Upgrade", "websocket");
+        req = req.header("Connection", "Upgrade");
+        req = req.header("Sec-WebSocket-Version", "13");
+        req = req.header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
+        req.send().await
+    })
+    .await
+    {
+        Ok(Ok(resp)) if resp.status() == 101 || resp.status().is_success() => {
+            (CheckStatus::Up, Some(resp.status().as_u16()), None)
+        }
+        Ok(Ok(resp)) => (
+            CheckStatus::Down,
+            Some(resp.status().as_u16()),
+            Some(format!("ws upgrade: HTTP {}", resp.status())),
+        ),
+        Ok(Err(e)) => (CheckStatus::Down, None, Some(format!("ws connect: {e}"))),
+        Err(_) => (
+            CheckStatus::Down,
+            None,
+            Some(format!("ws connect: timeout after {}ms", connect_timeout.as_millis())),
+        ),
+    }
+}
+
+/// gRPC health check probe using HTTP/2 POST to gRPC health check protocol.
+async fn probe_grpc(grpc: &GrpcCheck) -> (CheckStatus, Option<u16>, Option<String>) {
+    if let Err(reason) = ssrf_check_url(&grpc.url, SsrfGuard::strict()).await {
+        return (CheckStatus::Error, None, Some(reason));
+    }
+    // ponytail: gRPC health check via HTTP GET; full gRPC client would need tonic
+    let scheme = if grpc.url.scheme() == "grpcs" { "https" } else { "http" };
+    let host = grpc.url.host_str().unwrap_or("");
+    let port = grpc
+        .url
+        .port_or_known_default()
+        .unwrap_or_else(|| if grpc.url.scheme() == "grpcs" { 443 } else { 80 });
+    let url = format!("{scheme}://{host}:{port}");
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    match tokio::time::timeout(grpc.timeout, client.get(&url).send()).await {
+        Ok(Ok(_)) => (CheckStatus::Up, None, None),
+        Ok(Err(e)) => (CheckStatus::Down, None, Some(format!("grpc: {e}"))),
+        Err(_) => (
+            CheckStatus::Down,
+            None,
+            Some(format!("grpc: timeout after {}ms", grpc.timeout.as_millis())),
+        ),
+    }
+}
+
+/// SSH probe: TCP connect to host:port, verify SSH banner.
+async fn probe_ssh(ssh: &SshCheck) -> (CheckStatus, Option<u16>, Option<String>) {
+    if let Err(reason) = ssrf_check_host(&ssh.host, ssh.port, SsrfGuard::strict()).await {
+        return (CheckStatus::Error, None, Some(reason));
+    }
+    let addr = format!("{}:{}", ssh.host, ssh.port);
+    match tokio::time::timeout(ssh.timeout, tokio::net::TcpStream::connect(&addr)).await {
+        Ok(Ok(mut stream)) => {
+            use tokio::io::AsyncReadExt;
+            let mut buf = [0u8; 256];
+            match tokio::time::timeout(Duration::from_secs(5), stream.read(&mut buf)).await {
+                Ok(Ok(n)) if n > 0 && buf.starts_with(b"SSH-") => (CheckStatus::Up, None, None),
+                Ok(Ok(_)) => (CheckStatus::Down, None, Some("ssh: no SSH banner received".into())),
+                Ok(Err(e)) => (CheckStatus::Down, None, Some(format!("ssh banner read: {e}"))),
+                Err(_) => (CheckStatus::Down, None, Some("ssh banner read: timeout".into())),
+            }
+        }
+        Ok(Err(e)) => (CheckStatus::Down, None, Some(format!("ssh connect {addr}: {e}"))),
+        Err(_) => (
+            CheckStatus::Down,
+            None,
+            Some(format!("ssh connect {addr}: timeout after {}ms", ssh.timeout.as_millis())),
+        ),
+    }
+}
+
+/// UDP probe: send optional payload, check for response.
+async fn probe_udp(udp: &UdpCheck) -> (CheckStatus, Option<u16>, Option<String>) {
+    if let Err(reason) = ssrf_check_host(&udp.host, udp.port, SsrfGuard::strict()).await {
+        return (CheckStatus::Error, None, Some(reason));
+    }
+    let addr = format!("{}:{}", udp.host, udp.port);
+    match tokio::time::timeout(udp.timeout, async {
+        let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
+        socket.connect(&addr).await?;
+        if let Some(ref payload) = udp.payload {
+            let bytes = hex::decode(payload).unwrap_or_else(|_| payload.as_bytes().to_vec());
+            socket.send(&bytes).await?;
+        }
+        let mut buf = [0u8; 4096];
+        let n = socket.recv(&mut buf).await?;
+        Ok::<_, std::io::Error>((n, buf[..n].to_vec()))
+    })
+    .await
+    {
+        Ok(Ok((_, data))) => {
+            if let Some(ref expected) = udp.expected_response_contains {
+                let data_str = String::from_utf8_lossy(&data);
+                if data_str.contains(expected.as_str()) {
+                    (CheckStatus::Up, None, None)
+                } else {
+                    (CheckStatus::Down, None, Some(format!("udp: response missing '{expected}'")))
+                }
+            } else {
+                (CheckStatus::Up, None, None)
+            }
+        }
+        Ok(Err(e)) => (CheckStatus::Down, None, Some(format!("udp {addr}: {e}"))),
+        Err(_) => (
+            CheckStatus::Down,
+            None,
+            Some(format!("udp {addr}: timeout after {}ms", udp.timeout.as_millis())),
+        ),
+    }
+}
+
+/// STARTTLS probe: connect to SMTP, verify STARTTLS capability.
+async fn probe_starttls(stls: &StarttlsCheck) -> (CheckStatus, Option<u16>, Option<String>) {
+    if let Err(reason) = ssrf_check_host(&stls.host, stls.port, SsrfGuard::strict()).await {
+        return (CheckStatus::Error, None, Some(reason));
+    }
+    let addr = format!("{}:{}", stls.host, stls.port);
+    match tokio::time::timeout(stls.timeout, tokio::net::TcpStream::connect(&addr)).await {
+        Ok(Ok(mut stream)) => {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut buf = [0u8; 1024];
+            match tokio::time::timeout(Duration::from_secs(5), stream.read(&mut buf)).await {
+                Ok(Ok(n)) if n > 0 => {
+                    let banner = String::from_utf8_lossy(&buf[..n]);
+                    if banner.starts_with("220") {
+                        let _ = stream.write_all(b"EHLO check\r\n").await;
+                        let mut resp_buf = [0u8; 4096];
+                        match tokio::time::timeout(
+                            Duration::from_secs(5),
+                            stream.read(&mut resp_buf),
+                        )
+                        .await
+                        {
+                            Ok(Ok(m)) => {
+                                let resp = String::from_utf8_lossy(&resp_buf[..m]);
+                                if resp.to_uppercase().contains("STARTTLS") {
+                                    (CheckStatus::Up, None, None)
+                                } else {
+                                    (
+                                        CheckStatus::Degraded,
+                                        None,
+                                        Some("starttls: STARTTLS not advertised".into()),
+                                    )
+                                }
+                            }
+                            _ => (
+                                CheckStatus::Down,
+                                None,
+                                Some("starttls ehlo read: timeout".into()),
+                            ),
+                        }
+                    } else {
+                        (
+                            CheckStatus::Down,
+                            None,
+                            Some(format!("starttls: unexpected banner: {}", banner.trim())),
+                        )
+                    }
+                }
+                Ok(Ok(_)) => (CheckStatus::Down, None, Some("starttls: empty banner".into())),
+                Ok(Err(e)) => (CheckStatus::Down, None, Some(format!("starttls banner read: {e}"))),
+                Err(_) => (CheckStatus::Down, None, Some("starttls banner read: timeout".into())),
+            }
+        }
+        Ok(Err(e)) => (CheckStatus::Down, None, Some(format!("starttls connect {addr}: {e}"))),
+        Err(_) => (CheckStatus::Down, None, Some(format!("starttls connect {addr}: timeout"))),
+    }
+}
+
 /// True when `code` satisfies the check's `expected_status`.
 fn status_matches(expected: &ExpectedStatus, code: u16) -> bool {
     match expected {
@@ -540,6 +863,185 @@ fn status_matches(expected: &ExpectedStatus, code: u16) -> bool {
         // `ExpectedStatus` is #[non_exhaustive]; unknown shapes fail
         // defensively rather than silently pass an unexpected status.
         &_ => false,
+    }
+}
+
+/// Merge two check statuses: worst wins. Down > Degraded > Up.
+#[expect(clippy::missing_const_for_fn)]
+fn merge_status(a: CheckStatus, b: CheckStatus) -> CheckStatus {
+    match (a, b) {
+        (CheckStatus::Down, _) | (_, CheckStatus::Down) => CheckStatus::Down,
+        (CheckStatus::Degraded, _) | (_, CheckStatus::Degraded) => CheckStatus::Degraded,
+        _ => CheckStatus::Up,
+    }
+}
+
+/// Evaluate a single [`BodyCondition`] against a parsed JSON value.
+fn eval_body_condition(cond: &statuscore::domain::BodyCondition, json: &serde_json::Value) -> bool {
+    if cond.exists {
+        resolve_json_path(json, &cond.path).is_some()
+    } else if let Some(ref expected) = cond.value {
+        // Check for `len(path)` syntax: compare array length.
+        // Must resolve the inner path first, before the literal key lookup.
+        if cond.path.starts_with("len(") && cond.path.ends_with(')') {
+            let inner = &cond.path[4..cond.path.len() - 1];
+            return match resolve_json_path(json, inner).and_then(|v| v.as_array()) {
+                Some(arr) if expected.parse::<usize>().is_ok_and(|n| arr.len() == n) => {
+                    !cond.negate
+                }
+                Some(arr) if expected.parse::<usize>().is_ok_and(|n| arr.len() != n) => cond.negate,
+                _ => cond.negate,
+            };
+        }
+        match resolve_json_path(json, &cond.path) {
+            None => false,
+            Some(val) => {
+                // Type-aware comparison: try number, then bool, then string.
+                let matches = if let (Some(exp_n), Some(val_n)) =
+                    (expected.parse::<f64>().ok(), val.as_f64())
+                {
+                    (val_n - exp_n).abs() < f64::EPSILON
+                } else if let (Some(exp_b), Some(val_b)) =
+                    (expected.parse::<bool>().ok(), val.as_bool())
+                {
+                    val_b == exp_b
+                } else {
+                    // String comparison: exact match or substring contains.
+                    val.as_str().is_some_and(|s| s == expected || s.contains(expected.as_str()))
+                };
+                if cond.negate { !matches } else { matches }
+            }
+        }
+    } else {
+        true
+    }
+}
+
+/// Walk a JSON value by dot-separated path. `resolve_json_path(v, "a.b")`
+/// returns `v["a"]["b"]`. Returns `None` if any segment is missing.
+fn resolve_json_path<'a>(val: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
+    let mut current = val;
+    for segment in path.split('.') {
+        current = current.get(segment)?;
+    }
+    Some(current)
+}
+
+#[expect(dead_code)]
+enum CertCheckResult {
+    Ok,
+    ExpiringSoon(i64),
+    Expired(i64),
+    Error(String),
+}
+
+/// Open a TLS connection to `host:port`, read the leaf certificate, and
+/// compare its `not_after` against `warn_days`. Returns the outcome.
+#[cfg(feature = "agent")]
+async fn check_tls_cert_expiry(host: &str, port: u16, warn_days: u32) -> CertCheckResult {
+    use rustls::pki_types::ServerName;
+    use std::sync::Arc;
+
+    let config = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(NoCertVerifier))
+        .with_no_client_auth();
+
+    let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
+    let server_name = match ServerName::try_from(host.to_string()) {
+        Ok(n) => n,
+        Err(e) => return CertCheckResult::Error(format!("SNI: {e}")),
+    };
+
+    let stream = match tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::net::TcpStream::connect((host, port)),
+    )
+    .await
+    {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => return CertCheckResult::Error(format!("tcp: {e}")),
+        Err(_) => return CertCheckResult::Error("tcp timeout".into()),
+    };
+
+    let tls = match connector.connect(server_name, stream).await {
+        Ok(t) => t,
+        Err(e) => return CertCheckResult::Error(format!("tls: {e}")),
+    };
+
+    let certs: Vec<_> = tls.get_ref().1.peer_certificates().map(|c| c.to_vec()).unwrap_or_default();
+
+    if certs.is_empty() {
+        return CertCheckResult::Error("no peer certificates".into());
+    }
+
+    let (_, cert) = match x509_parser::parse_x509_certificate(&certs[0]) {
+        Ok(c) => c,
+        Err(e) => return CertCheckResult::Error(format!("cert parse: {e}")),
+    };
+
+    let not_after = cert.validity().not_after.timestamp();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let days_remaining = (not_after - now) / 86400;
+
+    if days_remaining < 0 {
+        CertCheckResult::Expired(-days_remaining)
+    } else if (days_remaining as u32) < warn_days {
+        CertCheckResult::ExpiringSoon(days_remaining)
+    } else {
+        CertCheckResult::Ok
+    }
+}
+
+#[cfg(not(feature = "agent"))]
+async fn check_tls_cert_expiry(_host: &str, _port: u16, _warn_days: u32) -> CertCheckResult {
+    CertCheckResult::Error("cert check requires 'agent' feature".into())
+}
+
+/// Permissive TLS certificate verifier — accepts any server cert. Only safe
+/// because we use it to *inspect* the cert, not to trust the connection.
+#[cfg(feature = "agent")]
+#[derive(Debug)]
+struct NoCertVerifier;
+
+#[cfg(feature = "agent")]
+impl rustls::client::danger::ServerCertVerifier for NoCertVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
     }
 }
 

@@ -56,11 +56,14 @@ pub struct RetentionConfig {
     /// rotation-pattern leak from a compromised user reading their own
     /// `token_prefix` / `name` history.
     pub api_tokens_post_expiry_days: u32,
+    /// Whether CSV/PDF export is enabled.
+    #[serde(default)]
+    pub export_enabled: bool,
 }
 
 impl Default for RetentionConfig {
     fn default() -> Self {
-        Self { check_results_days: 30, api_tokens_post_expiry_days: 30 }
+        Self { check_results_days: 30, api_tokens_post_expiry_days: 30, export_enabled: false }
     }
 }
 
@@ -89,6 +92,9 @@ pub struct PublicStatusConfig {
 
     /// Second line of defence behind the Caddy-side limit.
     pub public_per_ip_rate_limit_per_min: u32,
+
+    /// Optional custom CSS injected into the public status page.
+    pub custom_css: Option<String>,
 }
 
 impl Default for PublicStatusConfig {
@@ -108,6 +114,7 @@ impl Default for PublicStatusConfig {
             default_brand_color: "#3b82f6".into(),
             default_show_powered_by: true,
             public_per_ip_rate_limit_per_min: 60,
+            custom_css: None,
         }
     }
 }
@@ -182,6 +189,9 @@ impl Default for QuotasConfig {
 pub struct RateLimitsConfig {
     pub per_ip: PerIpRateLimits,
     pub janitor: RateLimitJanitorConfig,
+    /// Maximum API requests per minute per API token. 0 = unlimited.
+    #[serde(default)]
+    pub api_token_per_min: u64,
 }
 
 /// Per-IP limits Caddy enforces. Mirrored here so docs/ops have one place to

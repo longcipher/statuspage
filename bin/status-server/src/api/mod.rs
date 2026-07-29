@@ -1,7 +1,9 @@
 //! API v1 routes — real handlers backed by `storage::Storage`.
 
+pub(crate) mod badges;
 mod bulk;
 mod components;
+pub(crate) mod custom_css;
 mod dashboard;
 mod error;
 mod escalation_policies;
@@ -11,6 +13,7 @@ mod incident_ops;
 mod incidents;
 mod maintenance;
 mod metrics;
+pub(crate) mod metrics_endpoint;
 mod notification_channels;
 mod on_call_schedules;
 mod page_assets;

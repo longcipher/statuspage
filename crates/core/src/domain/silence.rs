@@ -138,7 +138,7 @@ mod tests {
         reasons: Vec<DeliveryReason>,
     ) -> SilenceRule {
         SilenceRule {
-            id: Uuid::new_v4(),
+            id: Uuid::max(),
             title: "test".into(),
             description: None,
             target_id,
@@ -155,34 +155,34 @@ mod tests {
     #[test]
     fn global_rule_matches_everything() {
         let r = rule(None, None, vec![]);
-        assert!(r.matches(Uuid::new_v4(), None, DeliveryReason::IncidentOpened));
-        assert!(r.matches(Uuid::new_v4(), Some(Uuid::new_v4()), DeliveryReason::IncidentResolved));
+        assert!(r.matches(Uuid::nil(), None, DeliveryReason::IncidentOpened));
+        assert!(r.matches(Uuid::nil(), Some(Uuid::max()), DeliveryReason::IncidentResolved));
     }
 
     #[test]
     fn target_scoped_rule_only_matches_that_target() {
-        let t = Uuid::new_v4();
+        let t = Uuid::max();
         let r = rule(Some(t), None, vec![]);
         assert!(r.matches(t, None, DeliveryReason::IncidentOpened));
-        assert!(!r.matches(Uuid::new_v4(), None, DeliveryReason::IncidentOpened));
+        assert!(!r.matches(Uuid::nil(), None, DeliveryReason::IncidentOpened));
     }
 
     #[test]
     fn reason_whitelist_filters() {
         let r = rule(None, None, vec![DeliveryReason::IncidentOpened]);
-        assert!(r.matches(Uuid::new_v4(), None, DeliveryReason::IncidentOpened));
-        assert!(!r.matches(Uuid::new_v4(), None, DeliveryReason::IncidentResolved));
+        assert!(r.matches(Uuid::nil(), None, DeliveryReason::IncidentOpened));
+        assert!(!r.matches(Uuid::nil(), None, DeliveryReason::IncidentResolved));
     }
 
     #[test]
     fn channel_scoped_rule_matches_when_channel_resolved() {
-        let ch = Uuid::new_v4();
+        let ch = Uuid::max();
         let r = rule(None, Some(ch), vec![]);
         // Per-incident check (channel not yet resolved): still matches.
-        assert!(r.matches(Uuid::new_v4(), None, DeliveryReason::IncidentOpened));
+        assert!(r.matches(Uuid::nil(), None, DeliveryReason::IncidentOpened));
         // Per-channel check: only the scoped channel matches.
-        assert!(r.matches(Uuid::new_v4(), Some(ch), DeliveryReason::IncidentOpened));
-        assert!(!r.matches(Uuid::new_v4(), Some(Uuid::new_v4()), DeliveryReason::IncidentOpened));
+        assert!(r.matches(Uuid::nil(), Some(ch), DeliveryReason::IncidentOpened));
+        assert!(!r.matches(Uuid::nil(), Some(Uuid::nil()), DeliveryReason::IncidentOpened));
     }
 
     #[test]

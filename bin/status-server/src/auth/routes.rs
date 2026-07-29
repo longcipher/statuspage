@@ -28,6 +28,9 @@ pub fn routes() -> Router<AppState> {
         // ── Magic-link login ──
         .route("/magic-link/request", post(magic_link_request))
         .route("/magic-link/verify", post(magic_link_verify))
+        // ── OIDC login ──
+        .route("/oidc/login", get(crate::auth::oidc::oidc_login))
+        .route("/oidc/callback", get(crate::auth::oidc::oidc_callback))
         // ── Session (browser) ──
         .route("/session", get(get_session).delete(destroy_session))
         .route("/sessions", get(list_sessions))

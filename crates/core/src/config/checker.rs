@@ -12,6 +12,12 @@ pub struct CheckerConfig {
     /// Process-wide RDAP concurrency cap (per TLD).
     #[serde(default = "default_rdap_max_inflight")]
     pub rdap_max_inflight: usize,
+    /// Optional URL to check internet connectivity before probing targets.
+    /// When set, the scheduler pings this URL first; if it fails, all
+    /// targets are skipped for that sweep. Use "https://1.1.1.1" or
+    /// similar. Empty = disabled.
+    #[serde(default)]
+    pub connectivity_check_url: Option<String>,
 }
 
 const fn default_per_host_max_inflight() -> usize {

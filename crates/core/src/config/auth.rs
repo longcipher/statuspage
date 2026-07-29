@@ -20,6 +20,13 @@ pub struct AuthConfig {
     pub invitations: InvitationsConfig,
     pub api_tokens: ApiTokensConfig,
     pub magic_link: MagicLinkConfig,
+    /// OIDC configuration for generic identity providers.
+    #[serde(default)]
+    pub oidc: OidcConfig,
+    /// Basic Auth credentials. When set, the API is protected by HTTP
+    /// Basic Authentication in addition to session-based auth.
+    #[serde(default)]
+    pub basic_auth: BasicAuthConfig,
 }
 
 impl Default for AuthConfig {
@@ -39,6 +46,8 @@ impl Default for AuthConfig {
             invitations: InvitationsConfig::default(),
             api_tokens: ApiTokensConfig::default(),
             magic_link: MagicLinkConfig::default(),
+            oidc: OidcConfig::default(),
+            basic_auth: BasicAuthConfig::default(),
         }
     }
 }
@@ -61,6 +70,14 @@ impl AuthConfig {
 
     pub fn google_login_enabled(&self) -> bool {
         self.method_enabled("google_oauth") && self.google.is_configured()
+    }
+
+    pub fn oidc_login_enabled(&self) -> bool {
+        self.method_enabled("oidc") && self.oidc.enabled
+    }
+
+    pub const fn basic_auth_enabled(&self) -> bool {
+        self.basic_auth.enabled
     }
 }
 
@@ -168,4 +185,49 @@ impl Default for MagicLinkConfig {
     fn default() -> Self {
         Self { expiry_minutes: 15, rate_limit_seconds: 60 }
     }
+}
+
+/// OIDC (OpenID Connect) configuration for generic identity providers.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct OidcConfig {
+    /// Whether OIDC authentication is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+    /// OIDC issuer URL (e.g. "https://accounts.google.com").
+    #[serde(default)]
+    pub issuer_url: String,
+    /// OIDC client ID.
+    #[serde(default)]
+    pub client_id: String,
+    /// OIDC client secret.
+    #[serde(default, with = "secret_str")]
+    pub client_secret: SecretString,
+    /// OIDC redirect URL (e.g. "https://app.example.com/api/v1/auth/oidc/callback").
+    #[serde(default)]
+    pub redirect_url: String,
+    /// Additional scopes to request (default: "openid email profile").
+    #[serde(default = "default_oidc_scopes")]
+    pub scopes: String,
+    /// Optional allowlist of email domains (e.g. `["example.com"]`).
+    /// Empty = allow all domains.
+    #[serde(default)]
+    pub allowed_email_domains: Vec<String>,
+}
+
+fn default_oidc_scopes() -> String {
+    "openid email profile".to_string()
+}
+
+/// Basic Auth configuration.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct BasicAuthConfig {
+    /// Whether Basic Auth is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Username for Basic Auth.
+    #[serde(default)]
+    pub username: String,
+    /// Password for Basic Auth (stored as bcrypt hash).
+    #[serde(default, with = "secret_str")]
+    pub password: SecretString,
 }

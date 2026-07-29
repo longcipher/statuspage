@@ -34,6 +34,33 @@ pub mod telegram;
 pub mod webhook;
 pub mod whatsapp;
 
+pub mod awsses;
+pub mod clickup;
+pub mod datadog;
+pub mod gitea;
+pub mod github;
+pub mod gitlab;
+pub mod gotify;
+pub mod homeassistant;
+pub mod ifttt;
+pub mod ilert;
+pub mod incidentio;
+pub mod line;
+pub mod matrix;
+pub mod mattermost;
+pub mod n8n;
+pub mod newrelic;
+pub mod opsgenie;
+pub mod rocketchat;
+pub mod sendgrid;
+pub mod signal;
+pub mod signl4;
+pub mod splunk;
+pub mod squadcast;
+pub mod webex;
+pub mod zapier;
+pub mod zulip;
+
 use async_trait::async_trait;
 use statuscore::domain::ChannelConfig;
 use statuscore::domain::{Incident, IncidentSeverity};
@@ -49,6 +76,33 @@ use crate::notifier::slack::SlackNotifier;
 use crate::notifier::sms::SmsNotifier;
 use crate::notifier::telegram::TelegramNotifier;
 use crate::notifier::whatsapp::WhatsAppNotifier;
+
+use crate::notifier::awsses::AwsSesNotifier;
+use crate::notifier::clickup::ClickUpNotifier;
+use crate::notifier::datadog::DatadogNotifier;
+use crate::notifier::gitea::GiteaNotifier;
+use crate::notifier::github::GitHubNotifier;
+use crate::notifier::gitlab::GitLabNotifier;
+use crate::notifier::gotify::GotifyNotifier;
+use crate::notifier::homeassistant::HomeAssistantNotifier;
+use crate::notifier::ifttt::IFTTTNotifier;
+use crate::notifier::ilert::IlertNotifier;
+use crate::notifier::incidentio::IncidentioNotifier;
+use crate::notifier::line::LineNotifier;
+use crate::notifier::matrix::MatrixNotifier;
+use crate::notifier::mattermost::MattermostNotifier;
+use crate::notifier::n8n::N8nNotifier;
+use crate::notifier::newrelic::NewRelicNotifier;
+use crate::notifier::opsgenie::OpsgenieNotifier;
+use crate::notifier::rocketchat::RocketchatNotifier;
+use crate::notifier::sendgrid::SendGridNotifier;
+use crate::notifier::signal::SignalNotifier;
+use crate::notifier::signl4::SIGNL4Notifier;
+use crate::notifier::splunk::SplunkNotifier;
+use crate::notifier::squadcast::SquadcastNotifier;
+use crate::notifier::webex::WebexNotifier;
+use crate::notifier::zapier::ZapierNotifier;
+use crate::notifier::zulip::ZulipNotifier;
 
 /// A notification channel. Implementations deliver a rendered message to a
 /// single transport (Slack, Discord, email, webhook, …).
@@ -226,6 +280,48 @@ pub fn build_notifier(
             Box::new(PagerDutyNotifier::new_with_client(c.clone(), client))
         }
         ChannelConfig::Ntfy(c) => Box::new(NtfyNotifier::new_with_client(c.clone(), client)),
+        ChannelConfig::Opsgenie(c) => {
+            Box::new(OpsgenieNotifier::new_with_client(c.clone(), client))
+        }
+        ChannelConfig::Gotify(c) => Box::new(GotifyNotifier::new_with_client(c.clone(), client)),
+        ChannelConfig::Matrix(c) => Box::new(MatrixNotifier::new_with_client(c.clone(), client)),
+        ChannelConfig::Mattermost(c) => {
+            Box::new(MattermostNotifier::new_with_client(c.clone(), client))
+        }
+        ChannelConfig::Rocketchat(c) => {
+            Box::new(RocketchatNotifier::new_with_client(c.clone(), client))
+        }
+        ChannelConfig::Webex(c) => Box::new(WebexNotifier::new_with_client(c.clone(), client)),
+        ChannelConfig::Zulip(c) => Box::new(ZulipNotifier::new_with_client(c.clone(), client)),
+        ChannelConfig::GitHub(c) => Box::new(GitHubNotifier::new_with_client(c.clone(), client)),
+        ChannelConfig::GitLab(c) => Box::new(GitLabNotifier::new_with_client(c.clone(), client)),
+        ChannelConfig::Gitea(c) => Box::new(GiteaNotifier::new_with_client(c.clone(), client)),
+        ChannelConfig::Ilert(c) => Box::new(IlertNotifier::new_with_client(c.clone(), client)),
+        ChannelConfig::Incidentio(c) => {
+            Box::new(IncidentioNotifier::new_with_client(c.clone(), client))
+        }
+        ChannelConfig::Squadcast(c) => {
+            Box::new(SquadcastNotifier::new_with_client(c.clone(), client))
+        }
+        ChannelConfig::SIGNL4(c) => Box::new(SIGNL4Notifier::new_with_client(c.clone(), client)),
+        ChannelConfig::Datadog(c) => Box::new(DatadogNotifier::new_with_client(c.clone(), client)),
+        ChannelConfig::NewRelic(c) => {
+            Box::new(NewRelicNotifier::new_with_client(c.clone(), client))
+        }
+        ChannelConfig::Splunk(c) => Box::new(SplunkNotifier::new_with_client(c.clone(), client)),
+        ChannelConfig::Line(c) => Box::new(LineNotifier::new_with_client(c.clone(), client)),
+        ChannelConfig::Signal(c) => Box::new(SignalNotifier::new_with_client(c.clone(), client)),
+        ChannelConfig::ClickUp(c) => Box::new(ClickUpNotifier::new_with_client(c.clone(), client)),
+        ChannelConfig::Ifttt(c) => Box::new(IFTTTNotifier::new_with_client(c.clone(), client)),
+        ChannelConfig::Zapier(c) => Box::new(ZapierNotifier::new_with_client(c.clone(), client)),
+        ChannelConfig::N8n(c) => Box::new(N8nNotifier::new_with_client(c.clone(), client)),
+        ChannelConfig::HomeAssistant(c) => {
+            Box::new(HomeAssistantNotifier::new_with_client(c.clone(), client))
+        }
+        ChannelConfig::AwsSes(c) => Box::new(AwsSesNotifier::new_with_client(c.clone(), client)),
+        ChannelConfig::SendGrid(c) => {
+            Box::new(SendGridNotifier::new_with_client(c.clone(), client))
+        }
         // `ChannelConfig` is `#[non_exhaustive]`: a future variant added
         // upstream must not break dispatch. Fall back to `LogNotifier` so
         // delivery stays total (same rationale as the operator-managed

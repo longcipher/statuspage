@@ -7,6 +7,7 @@ mod runtime;
 mod security;
 mod server;
 mod storage_config;
+mod tunneling;
 
 pub use api::*;
 pub use auth::*;
@@ -17,6 +18,7 @@ pub use runtime::*;
 pub use security::*;
 pub use server::*;
 pub use storage_config::*;
+pub use tunneling::*;
 
 use std::path::PathBuf;
 
@@ -52,8 +54,8 @@ mod secret_str {
 
 const ENV_PREFIX: &str = "STATUSPAGE";
 const ENV_SEPARATOR: &str = "__";
-const DEFAULT_CONFIG_PATH: &str = "config/default.toml";
-const CONFIG_PATH_ENV: &str = "STATUSPAGE_CONFIG_PATH";
+pub const DEFAULT_CONFIG_PATH: &str = "config/default.toml";
+pub const CONFIG_PATH_ENV: &str = "STATUSPAGE_CONFIG_PATH";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AppConfig {
@@ -100,6 +102,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub telegram: TelegramBotConfig,
     #[serde(default)]
+    pub tunneling: TunnelingConfig,
+    #[serde(default)]
     pub whatsapp_app: WhatsAppAppBotConfig,
     #[serde(default)]
     pub slack_oauth: ConnectOauthConfig,
@@ -112,7 +116,34 @@ impl AppConfig {
         let primary = std::env::var(CONFIG_PATH_ENV)
             .map_or_else(|_| PathBuf::from(DEFAULT_CONFIG_PATH), PathBuf::from);
 
-        let builder = Config::builder().add_source(File::from(primary).required(false)).add_source(
+        let primary_str = primary.to_string_lossy().to_string();
+        Self::load_from(&primary_str)
+    }
+
+    /// Load configuration from a file or directory. When `path` is a
+    /// directory, all `.toml` files in it are deep-merged (alphabetical
+    /// order). ponytail: config crate's File source handles single files;
+    /// directory merge is a simple loop.
+    pub fn load_from(path: &str) -> Result<Self> {
+        let path_buf = PathBuf::from(path);
+        let mut builder = Config::builder();
+
+        if path_buf.is_dir() {
+            let mut files: Vec<PathBuf> = std::fs::read_dir(&path_buf)
+                .map_err(|e| crate::error::AppError::Other(eyre::eyre!("read config dir: {e}")))?
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.path())
+                .filter(|p| p.extension().is_some_and(|ext| ext == "toml"))
+                .collect();
+            files.sort();
+            for f in files {
+                builder = builder.add_source(File::from(f).required(false));
+            }
+        } else {
+            builder = builder.add_source(File::from(path_buf).required(false));
+        }
+
+        builder = builder.add_source(
             Environment::with_prefix(ENV_PREFIX)
                 .prefix_separator("_")
                 .separator(ENV_SEPARATOR)

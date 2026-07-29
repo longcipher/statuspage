@@ -19,6 +19,129 @@ pub enum CheckSpecError {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct WebSocketCheck {
+    #[schema(value_type = String, format = "uri", example = "wss://echo.websocket.org")]
+    pub url: Url,
+    /// Send this message after connecting (optional).
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub message: Option<String>,
+    /// Expected substring in the response (optional).
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub expected_response_contains: Option<String>,
+    /// Connection timeout in milliseconds.
+    #[serde(with = "duration_ms")]
+    #[schema(value_type = u64, minimum = 100, maximum = 60000, example = 5000)]
+    pub timeout: Duration,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GrpcCheck {
+    /// gRPC endpoint, e.g. "grpc://service:50051" or "grpcs://service:443".
+    #[schema(value_type = String, format = "uri", example = "grpc://service:50051")]
+    pub url: Url,
+    /// Service name for the health check request (empty = overall health).
+    #[serde(default)]
+    #[schema(nullable = true, example = "my.package.MyService")]
+    pub service: Option<String>,
+    /// Connect timeout in milliseconds.
+    #[serde(with = "duration_ms")]
+    #[schema(value_type = u64, minimum = 100, maximum = 60000, example = 5000)]
+    pub timeout: Duration,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SshCheck {
+    #[schema(example = "server.example.com")]
+    pub host: String,
+    #[serde(default, deserialize_with = "deserialize_port")]
+    #[schema(minimum = 1, maximum = 65535, example = 22)]
+    pub port: u16,
+    /// Connect timeout in milliseconds.
+    #[serde(with = "duration_ms")]
+    #[schema(value_type = u64, minimum = 100, maximum = 60000, example = 5000)]
+    pub timeout: Duration,
+    /// Optional username to authenticate with.
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub username: Option<String>,
+    /// Optional password to authenticate with.
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub password: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UdpCheck {
+    #[schema(example = "dns.example.com")]
+    pub host: String,
+    #[serde(default, deserialize_with = "deserialize_port")]
+    #[schema(minimum = 1, maximum = 65535, example = 53)]
+    pub port: u16,
+    /// Hex-encoded payload to send (optional).
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub payload: Option<String>,
+    /// Expected hex-encoded response substring (optional).
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub expected_response_contains: Option<String>,
+    /// Timeout in milliseconds.
+    #[serde(with = "duration_ms")]
+    #[schema(value_type = u64, minimum = 100, maximum = 60000, example = 3000)]
+    pub timeout: Duration,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct StarttlsCheck {
+    /// SMTP host to connect to.
+    #[schema(example = "mail.example.com")]
+    pub host: String,
+    #[serde(default, deserialize_with = "deserialize_port")]
+    #[schema(minimum = 1, maximum = 65535, example = 25)]
+    pub port: u16,
+    /// Connect timeout in milliseconds.
+    #[serde(with = "duration_ms")]
+    #[schema(value_type = u64, minimum = 100, maximum = 60000, example = 5000)]
+    pub timeout: Duration,
+}
+
+/// A suite is a sequence of HTTP checks executed in order with shared context.
+/// Values extracted from one step's response body can be referenced by later steps.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SuiteCheck {
+    /// Ordered steps to execute.
+    pub steps: Vec<SuiteStep>,
+    /// Overall suite timeout in milliseconds.
+    #[serde(with = "duration_ms")]
+    #[schema(value_type = u64, minimum = 1000, maximum = 300_000, example = 60000)]
+    pub timeout: Duration,
+}
+
+impl SuiteCheck {
+    pub const MAX_STEPS: usize = 50;
+}
+
+/// One step in a SuiteCheck. Wraps an HttpCheck with optional value extraction.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SuiteStep {
+    /// Human-readable step name.
+    pub name: String,
+    /// The HTTP check to execute.
+    pub check: HttpCheck,
+    /// JSON path → context key mappings. Values extracted from the response
+    /// body are stored in the suite context and available to later steps
+    /// via `{{context_key}}` interpolation in URL, headers, and body.
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub extract: Option<std::collections::HashMap<String, String>>,
+    /// If true, execute this step even if a previous step failed.
+    #[serde(default)]
+    pub always_run: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum CheckSpec {
@@ -30,18 +153,50 @@ pub enum CheckSpec {
     DomainExpiry(DomainExpiryCheck),
     Dns(DnsCheck),
     Flow(FlowCheck),
+    WebSocket(WebSocketCheck),
+    Grpc(GrpcCheck),
+    Ssh(SshCheck),
+    Udp(UdpCheck),
+    Starttls(StarttlsCheck),
+    Suite(SuiteCheck),
 }
 
 impl CheckSpec {
     /// Every kind string `kind()` can return. Bounded set — safe as a metric
     /// label and lets inventory emit a 0 for kinds with no enabled monitors.
-    pub const ALL_KINDS: [&'static str; 8] =
-        ["http", "tcp", "ping", "heartbeat", "dns", "tls_cert", "domain_expiry", "flow"];
+    pub const ALL_KINDS: [&'static str; 14] = [
+        "http",
+        "tcp",
+        "ping",
+        "heartbeat",
+        "dns",
+        "tls_cert",
+        "domain_expiry",
+        "flow",
+        "websocket",
+        "grpc",
+        "ssh",
+        "udp",
+        "starttls",
+        "suite",
+    ];
 
     /// The subset of [`ALL_KINDS`] that the in-process control-plane scheduler
     /// can execute without a remote agent. The four agent-only kinds
     /// (`tls_cert`, `domain_expiry`, `dns`, `flow`) are excluded.
-    pub const CONTROL_PLANE_KINDS: [&'static str; 4] = ["http", "tcp", "ping", "heartbeat"];
+    pub const CONTROL_PLANE_KINDS: [&'static str; 11] = [
+        "http",
+        "tcp",
+        "ping",
+        "heartbeat",
+        "dns",
+        "tls_cert",
+        "websocket",
+        "grpc",
+        "ssh",
+        "udp",
+        "starttls",
+    ];
 
     /// Kind strings the control-plane scheduler can run locally — used by UI
     /// affordances that need to flag agent-only kinds. Mirrors
@@ -60,6 +215,12 @@ impl CheckSpec {
             Self::TlsCert(_) => "tls_cert",
             Self::DomainExpiry(_) => "domain_expiry",
             Self::Flow(_) => "flow",
+            Self::WebSocket(_) => "websocket",
+            Self::Grpc(_) => "grpc",
+            Self::Ssh(_) => "ssh",
+            Self::Udp(_) => "udp",
+            Self::Starttls(_) => "starttls",
+            Self::Suite(_) => "suite",
         }
     }
 
@@ -75,7 +236,20 @@ impl CheckSpec {
     /// in-process scheduler does not provide and must return a
     /// "not supported" error when dispatched locally.
     pub const fn supported_on_control_plane(&self) -> bool {
-        matches!(self, Self::Http(_) | Self::Tcp(_) | Self::Ping(_) | Self::Heartbeat(_))
+        matches!(
+            self,
+            Self::Http(_)
+                | Self::Tcp(_)
+                | Self::Ping(_)
+                | Self::Heartbeat(_)
+                | Self::Dns(_)
+                | Self::TlsCert(_)
+                | Self::WebSocket(_)
+                | Self::Grpc(_)
+                | Self::Ssh(_)
+                | Self::Udp(_)
+                | Self::Starttls(_)
+        )
     }
 
     /// Returns `Err` with a "not supported" error if this check kind cannot
@@ -100,6 +274,8 @@ pub fn min_interval_secs_for_kind(kind: &str) -> u64 {
         // A headless-browser run is far heavier than a single probe.
         "flow" => 300,
         "heartbeat" => 60,
+        "suite" => 60,
+        "websocket" | "grpc" | "ssh" | "udp" | "starttls" => 10,
         _ => 10,
     }
 }
@@ -131,6 +307,38 @@ pub enum ExpectedStatus {
     OneOf(Vec<u16>),
 }
 
+/// A condition evaluated against the JSON response body. Paths use dot
+/// notation (`database.status`). `len(path)` checks array length.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BodyCondition {
+    /// JSON path: `"status"`, `"database.status"`, `"len(results)"`.
+    pub path: String,
+    /// Expected value (string). Compared as string, number, or bool
+    /// depending on the JSON type at the path.
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub value: Option<String>,
+    /// When true, the path must exist (value is ignored).
+    #[serde(default)]
+    pub exists: bool,
+    /// When true, the condition is satisfied when the check fails.
+    #[serde(default)]
+    pub negate: bool,
+}
+
+/// DNS response codes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "UPPERCASE")]
+#[non_exhaustive]
+pub enum DnsRcode {
+    Noerror,
+    Nxdomain,
+    Servfail,
+    Refused,
+    Formerr,
+    Notimp,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct HttpCheck {
     #[schema(value_type = String, format = "uri", example = "https://example.com/healthz")]
@@ -156,6 +364,22 @@ pub struct HttpCheck {
     /// On read, returns `"***"` if set. On write, send real value or omit the field.
     #[schema(nullable = true)]
     pub bearer_token: Option<String>,
+    /// JSON body conditions. Evaluated when the response body is valid JSON.
+    /// All conditions must pass for the check to be Up.
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub body_conditions: Option<Vec<BodyCondition>>,
+    /// Response time ceiling in milliseconds. Up when below; Degraded when
+    /// exceeded. 0 or absent = no limit.
+    #[serde(default)]
+    #[schema(nullable = true, example = 500)]
+    pub max_response_time_ms: Option<u64>,
+    /// TLS certificate expiry warning in days. When the server certificate
+    /// expires within this window the check reports Degraded. 0 or absent
+    /// = no cert check (use a separate `tls_cert` target for that).
+    #[serde(default)]
+    #[schema(nullable = true, example = 7)]
+    pub cert_expiry_warn_days: Option<u32>,
 }
 
 impl HttpCheck {
@@ -317,6 +541,11 @@ pub struct DnsCheck {
     #[serde(with = "duration_ms")]
     #[schema(value_type = u64, minimum = 100, maximum = 60000, example = 3000)]
     pub timeout: Duration,
+    /// Expected DNS response code. `None` = any successful response (answers
+    /// returned). Set to `NOERROR` explicitly to reject `NXDOMAIN` etc.
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub expected_rcode: Option<DnsRcode>,
 }
 
 /// A browser-driven login/transaction flow: a step sequence replayed against a
@@ -411,7 +640,13 @@ mod tests {
             | CheckSpec::Dns(_)
             | CheckSpec::TlsCert(_)
             | CheckSpec::DomainExpiry(_)
-            | CheckSpec::Flow(_) => {}
+            | CheckSpec::Flow(_)
+            | CheckSpec::WebSocket(_)
+            | CheckSpec::Grpc(_)
+            | CheckSpec::Ssh(_)
+            | CheckSpec::Udp(_)
+            | CheckSpec::Starttls(_)
+            | CheckSpec::Suite(_) => {}
         }
     }
 
@@ -421,14 +656,14 @@ mod tests {
         for k in CheckSpec::ALL_KINDS {
             assert!(seen.insert(k), "duplicate kind in ALL_KINDS: {k}");
         }
-        assert_eq!(CheckSpec::ALL_KINDS.len(), 8);
+        assert_eq!(CheckSpec::ALL_KINDS.len(), 14);
     }
 
     #[test]
     fn control_plane_kinds_exclude_agent_only_variants() {
-        // The four agent-only kinds must be absent from the control-plane set.
-        assert_eq!(CheckSpec::kinds_control_plane().len(), 4);
-        for agent_only in ["dns", "tls_cert", "domain_expiry", "flow"] {
+        // Only domain_expiry, flow, and suite remain agent-only.
+        assert_eq!(CheckSpec::kinds_control_plane().len(), 11);
+        for agent_only in ["domain_expiry", "flow", "suite"] {
             assert!(
                 !CheckSpec::CONTROL_PLANE_KINDS.contains(&agent_only),
                 "agent-only kind '{agent_only}' must not be control-plane supported"
@@ -455,21 +690,17 @@ mod tests {
     }
 
     #[test]
-    fn require_control_plane_support_rejects_agent_only_kinds() {
+    fn require_control_plane_support_accepts_dns_and_tls_cert() {
         let dns = CheckSpec::Dns(DnsCheck {
             domain: "api.example.com".into(),
             record_type: DnsRecordType::A,
             resolver: None,
             expected_contains: None,
             timeout: Duration::from_secs(3),
+            expected_rcode: None,
         });
-        assert!(!dns.supported_on_control_plane());
-        let err = dns.require_control_plane_support().unwrap_err();
-        assert!(
-            err.to_string().contains("not supported on the control plane"),
-            "unexpected error message: {err}"
-        );
-        assert!(err.to_string().contains("dns"));
+        assert!(dns.supported_on_control_plane());
+        assert!(dns.require_control_plane_support().is_ok());
 
         let tls = CheckSpec::TlsCert(TlsCertCheck {
             host: "api.example.com".into(),
@@ -479,11 +710,20 @@ mod tests {
             critical_days: 7,
             timeout: Duration::from_secs(3),
         });
-        assert!(!tls.supported_on_control_plane());
-        assert!(matches!(
-            tls.require_control_plane_support(),
-            Err(CheckSpecError::NotSupportedOnControlPlane(_))
-        ));
+        assert!(tls.supported_on_control_plane());
+        assert!(tls.require_control_plane_support().is_ok());
+    }
+
+    #[test]
+    fn require_control_plane_support_rejects_agent_only_kinds() {
+        let domain_expiry = CheckSpec::DomainExpiry(DomainExpiryCheck {
+            domain: "example.com".into(),
+            warn_days: 30,
+            critical_days: 7,
+            timeout: Duration::from_secs(3),
+        });
+        assert!(!domain_expiry.supported_on_control_plane());
+        assert!(domain_expiry.require_control_plane_support().is_err());
     }
 
     #[test]

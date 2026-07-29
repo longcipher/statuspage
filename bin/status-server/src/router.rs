@@ -35,6 +35,21 @@ pub fn build_router(state: AppState) -> Router {
     // pages rather than broken links.
     let serve_dir = ServeDir::new("target/site").fallback(tower::service_fn(spa_fallback));
 
+    // Management API (targets, channels, incidents, auth, etc.).
+    // Disabled when api.management_api_enabled = false — all /api/v1/*
+    // routes return 404. Public routes and heartbeat remain accessible.
+    let management_routes = if state.config.api.management_api_enabled {
+        crate::api::routes()
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                crate::auth::middleware::require_auth_middleware,
+            ))
+            .layer(axum::middleware::from_fn(crate::auth::middleware::csrf_guard_middleware))
+    } else {
+        Router::new()
+            .fallback(|| async { (axum::http::StatusCode::NOT_FOUND, "management API disabled") })
+    };
+
     let mut router = Router::new()
         // Liveness: always returns 200 "ok" as long as the process is up.
         .route("/healthz", get(|| async { "ok" }))
@@ -42,31 +57,27 @@ pub fn build_router(state: AppState) -> Router {
         // "not ready" with the underlying error on failure. Load balancers
         // should only route traffic when this returns 200.
         .route("/readyz", get(readyz))
-        // API v1 (management). Two middleware layers run on every request
-        // under this nest:
-        //
-        // 1. `require_auth_middleware` — rejects unauthenticated requests
-        //    with 401. This is the primary auth gate — without it, every
-        //    management endpoint (create/delete targets, status pages,
-        //    incidents, notification channels, etc.) would be reachable by
-        //    any unauthenticated caller.
-        //
-        // 2. `csrf_guard_middleware` — rejects state-changing requests
-        //    (POST/PATCH/DELETE/PUT) that don't carry `X-Requested-With`
-        //    (browser fetch) or `Authorization` (Bearer API token). This is
-        //    defence-in-depth on top of the per-handler `csrf_guard` and
-        //    runs before auth resolution, so a forged browser POST is
-        //    short-circuited before any DB read. GET / HEAD pass through
-        //    unchecked.
+        // Prometheus metrics — public, no auth.
+        .route("/metrics", get(crate::api::metrics_endpoint::metrics_handler))
+        // Custom CSS — public, no auth.
+        .route("/css/custom.css", get(crate::api::custom_css::custom_css_handler))
+        // SVG badges — public, no auth.
+        .route("/api/v1/endpoints/{id}/health/badge.svg", get(crate::api::badges::health_badge))
+        .route(
+            "/api/v1/endpoints/{id}/health/badge.shields",
+            get(crate::api::badges::health_badge_shields),
+        )
+        .route(
+            "/api/v1/endpoints/{id}/uptimes/{duration}/badge.svg",
+            get(crate::api::badges::uptime_badge),
+        )
+        .route(
+            "/api/v1/endpoints/{id}/response-times/{duration}/badge.svg",
+            get(crate::api::badges::response_time_badge),
+        )
         .nest(
             "/api/v1",
-            crate::api::routes()
-                .layer(axum::middleware::from_fn_with_state(
-                    state.clone(),
-                    crate::auth::middleware::require_auth_middleware,
-                ))
-                .layer(axum::middleware::from_fn(crate::auth::middleware::csrf_guard_middleware))
-                .layer(RequestBodyLimitLayer::new(MAX_REQUEST_BODY_BYTES)),
+            management_routes.layer(RequestBodyLimitLayer::new(MAX_REQUEST_BODY_BYTES)),
         )
         // Heartbeat endpoint — mounted as a separate nest so it can carry
         // its own per-IP rate-limit layer without the auth/CSRF middleware

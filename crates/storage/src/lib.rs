@@ -13,10 +13,14 @@
     allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::enum_glob_use)
 )]
 
+pub mod cached;
 pub mod duckdb;
 pub mod memory;
+pub mod postgres;
 pub mod traits;
 
+pub use cached::CachedStorage;
 pub use duckdb::DuckdbStorage;
 pub use memory::MemoryStorage;
+pub use postgres::PostgresStorage;
 pub use traits::{Storage, StorageError};

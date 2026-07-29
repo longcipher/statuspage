@@ -32,9 +32,8 @@ use common::security::SsrfGuard;
 /// Uses the strict (production-default) guard: loopback, RFC1918, link-local,
 /// ULA, multicast, broadcast, reserved, documentation, and cloud-metadata
 /// ranges are all rejected regardless of how the hostname was supplied.
-// Agent-only helper: retained for the future agent runtime; the control
-// plane rejects these check kinds via `require_control_plane_support()`.
-#[expect(dead_code)]
+// ponytail: SSRF guard always strict here; allow_private_targets only applies
+// to the scheduler's HTTP/TCP/ping probes via the shared reqwest client.
 pub(crate) async fn resolve_with_guard(host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
     let guard = SsrfGuard::strict();
     let target = format!("{host}:{port}");

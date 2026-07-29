@@ -1,8 +1,3 @@
-#![expect(dead_code)]
-// Agent-only probe: the control plane rejects these check kinds via
-// `require_control_plane_support()` before reaching this code. Kept as
-// the implementation site for a future agent runtime.
-
 //! DNS resolution probe.
 //!
 //! Resolves `spec.domain` for `spec.record_type` and reports Up when at
@@ -22,7 +17,7 @@ use std::time::Duration;
 
 use hickory_resolver::TokioResolver;
 use statuscore::domain::CheckStatus;
-use statuscore::domain::check::{DnsCheck, DnsRecordType};
+use statuscore::domain::check::{DnsCheck, DnsRcode, DnsRecordType};
 
 /// Outcome tuple shared with the other probes:
 /// `(status, response_code, error)`.
@@ -31,9 +26,9 @@ type ProbeOutcome = (CheckStatus, Option<u16>, Option<String>);
 /// Probe the DNS records for `spec.domain`.
 ///
 /// Returns `(status, None, error)`:
-/// - `Up` when records resolve and (when set) at least one contains
-///   `expected_contains` as a substring
-/// - `Down` on NXDOMAIN, timeout, missing substring, or empty answer
+/// - `Up` when records resolve, RCODE matches, and (when set) at least one
+///   contains `expected_contains` as a substring
+/// - `Down` on NXDOMAIN, wrong RCODE, timeout, missing substring, or empty answer
 /// - `Error` for resolver construction failures
 pub async fn probe_dns(spec: &DnsCheck) -> ProbeOutcome {
     let resolver = match build_resolver(&spec.resolver, spec.timeout) {
@@ -47,10 +42,28 @@ pub async fn probe_dns(spec: &DnsCheck) -> ProbeOutcome {
         }
     };
 
+    // Use the standard lookup API. For RCODE checking, we extract the
+    // response code from the error when the query fails (NXDOMAIN, SERVFAIL).
     let record_type = map_record_type(spec.record_type);
     let lookup = match resolver.lookup(&spec.domain, record_type).await {
         Ok(l) => l,
         Err(e) => {
+            // If an RCODE was expected (e.g. NXDOMAIN), check if the error
+            // matches that expectation.
+            if let Some(expected) = spec.expected_rcode {
+                let expected_str = format!("{expected:?}").to_uppercase();
+                let err_str = format!("{e}").to_uppercase();
+                if err_str.contains(&expected_str)
+                    || (expected == DnsRcode::Nxdomain && err_str.contains("NXDOMAIN"))
+                {
+                    return (CheckStatus::Up, None, None);
+                }
+                return (
+                    CheckStatus::Down,
+                    None,
+                    Some(format!("dns '{}': expected {:?}, got error: {e}", spec.domain, expected)),
+                );
+            }
             return (
                 CheckStatus::Down,
                 None,
@@ -59,10 +72,19 @@ pub async fn probe_dns(spec: &DnsCheck) -> ProbeOutcome {
         }
     };
 
-    // Collect the string forms of each answer record. We format the record
-    // *data* (not the whole `name TTL IN TYPE value` line) so an operator
-    // can put the expected IP / hostname in `expected_contains` and have it
-    // match regardless of the TTL the resolver cached.
+    // If expected_rcode is set and we got a successful response, verify
+    // it matches NOERROR.
+    if let Some(expected) = spec.expected_rcode {
+        if expected != DnsRcode::Noerror {
+            return (
+                CheckStatus::Down,
+                None,
+                Some(format!("dns '{}': expected {:?}, got NOERROR", spec.domain, expected)),
+            );
+        }
+    }
+
+    // Collect answers.
     let answers: Vec<String> = lookup
         .answers()
         .iter()
